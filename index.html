@@ -10,7 +10,8 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 *{box-sizing:border-box}
-body{margin:0 auto;max-width:1100px;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif;background:#0a0d19;color:#f2f4fa}
+body{margin:0 auto;max-width:1100px;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif;background:#0a0d19;color:#f2f4fa;overscroll-behavior-y:none}
+#pullHint{position:fixed;top:0;left:50%;transform:translate(-50%,-140%);z-index:60;background:#f5b90d;color:#111827;font-weight:700;font-size:13px;padding:8px 16px;border-radius:0 0 12px 12px;transition:transform .18s ease;pointer-events:none;white-space:nowrap}
 header{padding:16px 16px 8px;display:flex;gap:10px;align-items:flex-start}
 .header-text{flex:1;min-width:0}
 #menuBtn{flex:0 0 auto;padding:10px 13px;font-size:18px;line-height:1}
@@ -101,6 +102,7 @@ body.locked{overflow:hidden}
 </style>
 </head>
 <body>
+<div id="pullHint">↻ اسحب للتزامن</div>
 <div id="signinPage" role="dialog" aria-label="تسجيل الدخول">
   <div class="onboard-inner">
     <h2>📷 صوري وبرومبتاتي</h2>
@@ -114,7 +116,7 @@ body.locked{overflow:hidden}
 <div id="appPage">
 <header>
   <div class="header-text">
-  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.4</span></h1>
+  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.5</span></h1>
   <div class="sub" id="countLine">لا توجد صور بعد.</div>
   </div>
   <button type="button" class="btn-ghost" id="menuBtn" aria-label="فتح القائمة">☰</button>
@@ -2121,15 +2123,20 @@ function uploadDriveJson(name, bodyObj, existingId, stamp, deleted){
     appProperties: props
   };
   if(existingId){
-    return driveApi("files/" + existingId + "?uploadType=media", {
-      method: "PATCH", contentType: "application/json", body: body
-    }).then(function(res){
-      if(!res.ok) throw new Error("upload");
-      return driveApi("files/" + existingId, {
-        method: "PATCH", contentType: "application/json",
-        body: JSON.stringify({ appProperties: props })
-      });
-    });
+    /* Update = one multipart call on the UPLOAD endpoint (content +
+       appProperties together). The old code PATCHed the media body to
+       the regular endpoint, which rejects it — edits never uploaded
+       while creates (multipart via driveUpload) worked. */
+    var metaUp = { name: name, appProperties: props };
+    var boundaryUp = "-------promptpics" + Date.now();
+    var multipartUp = "--" + boundaryUp + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" +
+      JSON.stringify(metaUp) + "\r\n--" + boundaryUp + "\r\nContent-Type: application/json\r\n\r\n" +
+      body + "\r\n--" + boundaryUp + "--";
+    return driveUpload("files/" + existingId + "?uploadType=multipart", {
+      method: "PATCH",
+      contentType: "multipart/related; boundary=" + boundaryUp,
+      body: multipartUp
+    }).then(function(res){ if(!res.ok) throw new Error("upload"); return res.json(); });
   }
   var boundary = "-------promptpics" + Date.now();
   var multipart = "--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" +
@@ -2185,11 +2192,14 @@ function startSync(manual){
   if(!accessToken){ if(manual) toast("ما مسجّل دخول"); return Promise.resolve(false); }
   var firstDone = false;
   try{ firstDone = localStorage.getItem(SYNC_FIRST_KEY) === "1"; }catch(e){}
-  if(!firstDone && !manual) return Promise.resolve(false);
+  /* No gate on automatic sync: it runs on every edit, pull, reload,
+     poll and tab return. The first-sync backup + upload-all-first
+     protection still runs — automatic syncs just skip the confirm
+     popup and write the backup file directly. */
   if(!navigator.onLine){ if(manual) toast("ما كو اتصال بالإنترنت"); return Promise.resolve(false); }
   syncRunning = true;
   var flow = Promise.resolve(true);
-  if(!firstDone){
+  if(!firstDone && manual){
     flow = new Promise(function(resolve){
       showModal({
         message: "أول تزامن: راح نرفع كل الصور من هذا الجهاز أولاً، وبعدها نطبّق الحذف من السحابة. تريد نكمل؟",
@@ -2204,6 +2214,10 @@ function startSync(manual){
       return exportJsonPayload(false).then(function(payload){
         saveTextFile("promptpics-backup-" + backupStamp() + ".json", JSON.stringify(payload));
       });
+    });
+  } else if(!firstDone){
+    flow = exportJsonPayload(false).then(function(payload){
+      saveTextFile("promptpics-backup-" + backupStamp() + ".json", JSON.stringify(payload));
     });
   }
   return flow.then(function(){
@@ -2389,6 +2403,45 @@ function scheduleAutoSync(){
   }, 1500);
 }
 function afterLocalChange(){ scheduleAutoSync(); }
+/* ---- Pull-to-refresh (touch): pull down from the top to sync ---- */
+var pullStartY = 0, pullDist = 0, pullActive = false;
+function pullY(e){
+  if(e.touches && e.touches[0]) return e.touches[0].clientY;
+  if(e.changedTouches && e.changedTouches[0]) return e.changedTouches[0].clientY;
+  return 0;
+}
+function pullShow(dist, ready){
+  var el = document.getElementById("pullHint");
+  if(!el) return;
+  el.style.transform = "translate(-50%, " + Math.min(dist, 90) + "px)";
+  el.textContent = ready ? "↻ اترك للتزامن…" : "↻ اسحب للتزامن";
+}
+function pullHide(){
+  var el = document.getElementById("pullHint");
+  if(!el) return;
+  el.style.transform = "translate(-50%, -140%)";
+}
+function bindPullToRefresh(){
+  document.addEventListener("touchstart", function(e){
+    if(!accessToken || syncRunning) return;
+    var sy = (typeof window !== "undefined" && typeof window.scrollY === "number") ? window.scrollY : 0;
+    if(sy > 0) return;
+    pullActive = true; pullStartY = pullY(e); pullDist = 0;
+  }, { passive: true });
+  document.addEventListener("touchmove", function(e){
+    if(!pullActive) return;
+    var d = pullY(e) - pullStartY;
+    if(d <= 0){ pullDist = 0; pullHide(); return; }
+    pullDist = d;
+    pullShow(d, d >= 70);
+  }, { passive: true });
+  document.addEventListener("touchend", function(){
+    if(!pullActive) return;
+    pullActive = false;
+    var d = pullDist; pullDist = 0; pullHide();
+    if(d >= 70 && accessToken && !syncRunning) startSync(true);
+  });
+}
 function afterSyncDone(){ scheduleAutoSync(); }
 /* ---- Google Identity Services (token flow, proven PC flow) ---- */
 var signedInUI = false;
@@ -2568,7 +2621,7 @@ function showStatus(){
   var kb = estimateKB != null ? estimateKB : storageKB();
   var account = accessToken ? "مسجّل دخول ✓" : "غير مسجّل دخول";
   showModal({
-    title: "صوري وبرومبتاتي 3.2.4 — نسخة الحاسبة",
+    title: "صوري وبرومبتاتي 3.2.5 — نسخة الحاسبة",
     message: "عناصر: " + c.live + "\nالمفضلة: " + c.fav + "\nمحذوفات: " + c.trash + "\nحجم الحفظ التقريبي: " + kb + " كيلوبايت\nالحساب: " + account + "\n" + lastSyncText,
     buttons: [{ label: "حسناً", kind: "main" }]
   });
@@ -2758,6 +2811,7 @@ function bindUI(){
 document.addEventListener("DOMContentLoaded", function(){
   items = load();
   bindUI();
+  bindPullToRefresh();
   render();
   refreshEstimate();
   watchGisScript();
