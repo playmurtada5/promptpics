@@ -114,7 +114,7 @@ body.locked{overflow:hidden}
 <div id="appPage">
 <header>
   <div class="header-text">
-  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2</span></h1>
+  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.4</span></h1>
   <div class="sub" id="countLine">لا توجد صور بعد.</div>
   </div>
   <button type="button" class="btn-ghost" id="menuBtn" aria-label="فتح القائمة">☰</button>
@@ -409,6 +409,13 @@ function tagsMatch(tags, query){
 }
 function nextStamp(previous){
   return Math.max(Date.now(), (previous || 0) + 1);
+}
+/* Stamp used when uploading over a remote entry: the upload must carry a
+   stamp strictly newer than the remote one, or the other device will
+   treat its own copy as newer and push it back (sync ping-pong). */
+function uploadStampFor(localStamp, remoteStamp){
+  var ls = localStamp || 0, rs = remoteStamp || 0;
+  return ls > rs ? ls : nextStamp(rs);
 }
 function isSafeId(id){
   return typeof id === "string" && id.length >= 1 && id.length <= 160 && /^[A-Za-z0-9_-]+$/.test(id);
@@ -1844,8 +1851,8 @@ function mergeRemote(remoteFiles, localItems, tombs, dirtySet, isFirstSync){
     var tomb = tombById[remote.id] || null;
     if(remote.deleted){
       if(isFirstSync) return;
+      if(dirty[remote.id]) return;
       if(local && (!tomb || remote.updatedAt > tomb.updatedAt)){
-        if(dirty[remote.id]) conflicts.push(local);
         if(pickOrigFields(local)) droppedOrigIds.push(remote.id);
         delete byId[remote.id];
         tombById[remote.id] = { id: remote.id, updatedAt: remote.updatedAt };
@@ -1857,6 +1864,7 @@ function mergeRemote(remoteFiles, localItems, tombs, dirtySet, isFirstSync){
       return;
     }
     if(tomb){
+      if(dirty[remote.id]) return;
       if(tomb.updatedAt >= remote.updatedAt) return;
       delete tombById[remote.id];
       changed = true;
@@ -1865,7 +1873,7 @@ function mergeRemote(remoteFiles, localItems, tombs, dirtySet, isFirstSync){
       byId[remote.id] = remoteItemToLocal(remote);
       changed = true;
     } else if(remote.updatedAt > local.updatedAt){
-      if(dirty[remote.id]) conflicts.push(local);
+      if(dirty[remote.id]) return;
       if(remote.image !== local.image && pickOrigFields(local)) droppedOrigIds.push(remote.id);
       byId[remote.id] = mergeRemoteItem(local, remote);
       changed = true;
@@ -1937,14 +1945,18 @@ function remoteItemToLocal(remote){
   applyOrigFields(o, pickOrigFields(remote));
   return o;
 }
-function computeSyncPlan(localManifest, remoteListing){
+function computeSyncPlan(localManifest, remoteListing, dirtySet){
   var downloads = [], uploads = [];
+  var dirty = dirtySet || {};
   Object.keys(remoteListing).forEach(function(name){
     if(name.slice(-5) !== ".json") return;
     var id = name.slice(0, -5);
     if(!isSafeId(id)) return;
     var entry = remoteListing[name];
     var l = localManifest[id];
+    /* An unsynced local change always uploads — it is never silently
+       replaced by the remote version, whatever the stamps say. */
+    if(dirty[id] && l){ uploads.push(id); return; }
     if(!l || entry.updatedAt > l.updatedAt) downloads.push(id);
     else if(l.updatedAt > entry.updatedAt) uploads.push(id);
   });
@@ -2201,8 +2213,8 @@ function startSync(manual){
     var localManifest = {};
     items.forEach(function(it){ localManifest[it.id] = { id: it.id, updatedAt: it.updatedAt || 0, deleted: false }; });
     loadTombs().forEach(function(t){ localManifest[t.id] = { id: t.id, updatedAt: t.updatedAt || 0, deleted: true }; });
-    var plan = computeSyncPlan(localManifest, listing);
     var dirty = loadDirtyIds();
+    var plan = computeSyncPlan(localManifest, listing, dirty);
     var remoteBodies = [];
     var downloadedBodies = 0;
     var chain = Promise.resolve();
@@ -2243,10 +2255,19 @@ function startSync(manual){
         var tomb = null;
         mergedTombs.forEach(function(t){ if(t.id === id) tomb = t; });
         var body, stamp, isTomb;
-        if(live){ body = itemToSyncBody(live, false); stamp = live.updatedAt; isTomb = false; }
-        else if(tomb){ body = { id: id, title: "", prompt: "", image: "", createdAt: tomb.updatedAt, updatedAt: tomb.updatedAt, deleted: true }; stamp = tomb.updatedAt; isTomb = true; }
-        else return;
         var existing = ctx.listing[id + ".json"];
+        var remoteStamp = existing ? existing.updatedAt : 0;
+        if(live){
+          stamp = uploadStampFor(live.updatedAt, remoteStamp);
+          if(stamp !== live.updatedAt){ live.updatedAt = stamp; save(); }
+          body = itemToSyncBody(live, false); isTomb = false;
+        }
+        else if(tomb){
+          stamp = uploadStampFor(tomb.updatedAt, remoteStamp);
+          if(stamp !== tomb.updatedAt){ tomb.updatedAt = stamp; saveTombs(mergedTombs); }
+          body = { id: id, title: "", prompt: "", image: "", createdAt: tomb.updatedAt, updatedAt: tomb.updatedAt, deleted: true }; isTomb = true;
+        }
+        else return;
         return uploadDriveJson(id + ".json", body, existing ? existing.driveId : null, stamp, isTomb).then(function(){
           uploaded++;
           var cur = findItem(id);
@@ -2486,8 +2507,8 @@ function signIn(manual){
       var st = document.getElementById("signinStatus");
       if(st) st.textContent = "جارٍ تسجيل الدخول…";
     }
-    if(manual || !hint) tokenClient.requestAccessToken({ prompt: "consent" });
-    else tokenClient.requestAccessToken({ prompt: "none", hint: hint });
+    if(manual) tokenClient.requestAccessToken({ prompt: "consent" });
+    else tokenClient.requestAccessToken({ prompt: "none", hint: hint || undefined });
   }catch(e){ toast("ما تم تسجيل الدخول. جرّب من جديد."); }
 }
 function onSignedIn(){
@@ -2520,18 +2541,15 @@ function signOut(){
     message: "تسجيل الخروج يمسح محتوى المتصفح المحلي. تريد نكمل؟",
     buttons: [
       { label: "تسجيل الخروج", kind: "danger", onClick: function(){
-        try{
-          if(accessToken && google && google.accounts && google.accounts.oauth2){
-            google.accounts.oauth2.revoke(accessToken, function(){});
-          }
-        }catch(e){}
+        /* Local-only sign-out: the Google grant is NOT revoked, so the
+           phone app keeps syncing. Revoking would sign out every device. */
         accessToken = null;
         signedInUI = false;
         items = [];
         selectedIds = {}; cardNodes = {}; fpCache = {};
         pendingCompanionDeletes = [];
         try{
-          [KEY, SYNC_TOMB_KEY, SYNC_FIRST_KEY, SYNC_GRANT_KEY, SYNC_DIRTY_KEY, CONFLICTS_KEY, DRAFT_KEY].forEach(function(k){ localStorage.removeItem(k); });
+          [KEY, SYNC_TOMB_KEY, SYNC_GRANT_KEY, SYNC_DIRTY_KEY, CONFLICTS_KEY, DRAFT_KEY].forEach(function(k){ localStorage.removeItem(k); });
         }catch(e){}
         idbClear();
         document.getElementById("signinPage").classList.add("show");
@@ -2550,7 +2568,7 @@ function showStatus(){
   var kb = estimateKB != null ? estimateKB : storageKB();
   var account = accessToken ? "مسجّل دخول ✓" : "غير مسجّل دخول";
   showModal({
-    title: "صوري وبرومبتاتي 3.2 — نسخة الحاسبة",
+    title: "صوري وبرومبتاتي 3.2.4 — نسخة الحاسبة",
     message: "عناصر: " + c.live + "\nالمفضلة: " + c.fav + "\nمحذوفات: " + c.trash + "\nحجم الحفظ التقريبي: " + kb + " كيلوبايت\nالحساب: " + account + "\n" + lastSyncText,
     buttons: [{ label: "حسناً", kind: "main" }]
   });
