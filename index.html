@@ -2370,7 +2370,71 @@ function afterSyncDone(){ scheduleAutoSync(); }
 var signedInUI = false;
 var lastAuthManual = false;
 var pollStarted = false;
+/* GIS readiness: the GIS script loads async and may arrive AFTER
+   DOMContentLoaded, so initGis() is retried (script onload + poll) until
+   tokenClient exists. Sign-in must never dead-end on a slow load. */
+var gisPollTimer = null;
+var gisPollDeadline = 0;
+var gisFailed = false;
+var pendingSignIn = false;
+var gisReadyCallbacks = [];
+function setSigninStatus(msg){
+  var st = document.getElementById("signinStatus");
+  if(st) st.textContent = msg || "";
+}
+function onGisReadyOnce(cb){
+  if(typeof cb !== "function") return;
+  if(tokenClient){ try{ cb(); }catch(e){} return; }
+  gisReadyCallbacks.push(cb);
+}
+function ensureGisReady(){
+  if(tokenClient) return true;
+  initGis();
+  return !!tokenClient;
+}
+function stopGisPoll(){
+  if(gisPollTimer){ clearInterval(gisPollTimer); gisPollTimer = null; }
+}
+function flushGisReady(){
+  var cbs = gisReadyCallbacks; gisReadyCallbacks = [];
+  cbs.forEach(function(cb){ try{ cb(); }catch(e){} });
+  if(pendingSignIn){ pendingSignIn = false; signIn(true); }
+}
+function startGisPoll(){
+  if(tokenClient) return;
+  stopGisPoll();
+  gisPollDeadline = Date.now() + 15000;
+  gisPollTimer = setInterval(function(){
+    if(tokenClient){ stopGisPoll(); flushGisReady(); return; }
+    if(ensureGisReady()){ stopGisPoll(); flushGisReady(); return; }
+    if(Date.now() >= gisPollDeadline){
+      stopGisPoll();
+      gisFailed = true;
+      setSigninStatus("تعذّر تحميل خدمة تسجيل الدخول من Google. تحقق من الاتصال أو مانع المحتوى، ثم أعد المحاولة بالضغط على الزر من جديد.");
+    }
+  }, 250);
+}
+function watchGisScript(){
+  try{
+    var scripts = document.querySelectorAll('script[src*="gsi/client"]');
+    for(var i = 0; i < scripts.length; i++){
+      (function(gs){
+        if(gs.__ppGisWatched) return;
+        gs.__ppGisWatched = true;
+        gs.addEventListener("load", function(){
+          if(ensureGisReady()){ stopGisPoll(); flushGisReady(); }
+        });
+        gs.addEventListener("error", function(){
+          gisFailed = true;
+          stopGisPoll();
+          setSigninStatus("تعذّر تحميل خدمة تسجيل الدخول من Google. تحقق من الاتصال أو مانع المحتوى، ثم أعد المحاولة بالضغط على الزر من جديد.");
+        });
+      })(scripts[i]);
+    }
+  }catch(e){}
+}
 function initGis(){
+  if(tokenClient) return;
   try{
     if(typeof google === "undefined" || !google.accounts || !google.accounts.oauth2) return;
     tokenClient = google.accounts.oauth2.initTokenClient({
@@ -2389,10 +2453,20 @@ function initGis(){
         }
       }
     });
-  }catch(e){}
+    gisFailed = false;
+  }catch(e){
+    setSigninStatus("تعذّر تجهيز خدمة تسجيل الدخول من Google. تحقق من الاتصال ثم أعد المحاولة بالضغط على الزر من جديد.");
+  }
 }
 function signIn(manual){
-  if(!tokenClient){ toast("خدمة تسجيل الدخول غير جاهزة. حدّث الصفحة وجرّب من جديد."); return; }
+  if(!tokenClient){
+    setSigninStatus("جارٍ تجهيز خدمة تسجيل الدخول…");
+    if(manual) pendingSignIn = true;
+    gisFailed = false;
+    ensureGisReady();
+    if(!tokenClient){ startGisPoll(); return; }
+    pendingSignIn = false;
+  }
   lastAuthManual = !!manual;
   try{
     var hint = "";
@@ -2585,49 +2659,54 @@ function bindDrawer(){
   });
 }
 /* ---- Boot ---- */
+function onEl(id, ev, fn){
+  var el = document.getElementById(id);
+  if(el) el.addEventListener(ev, fn);
+}
 function bindUI(){
-  document.getElementById("addBtn").addEventListener("click", function(){ openForm(null, null); });
-  document.getElementById("googleSignInBtn").addEventListener("click", function(){ signIn(true); });
-  document.getElementById("search").addEventListener("input", render);
-  document.getElementById("tabAll").addEventListener("click", function(){ selectTab("all"); });
-  document.getElementById("tabFav").addEventListener("click", function(){ selectTab("fav"); });
-  document.getElementById("tabTrash").addEventListener("click", function(){ selectTab("trash"); });
-  document.getElementById("closeViewer").addEventListener("click", closeViewer);
-  document.getElementById("viewerCopy").addEventListener("click", function(){ copyText(viewerPromptText); });
-  document.getElementById("viewerEdit").addEventListener("click", function(){
+  onEl("addBtn", "click", function(){ openForm(null, null); });
+  onEl("googleSignInBtn", "click", function(){ signIn(true); });
+  onEl("search", "input", render);
+  onEl("tabAll", "click", function(){ selectTab("all"); });
+  onEl("tabFav", "click", function(){ selectTab("fav"); });
+  onEl("tabTrash", "click", function(){ selectTab("trash"); });
+  onEl("closeViewer", "click", closeViewer);
+  onEl("viewerCopy", "click", function(){ copyText(viewerPromptText); });
+  onEl("viewerEdit", "click", function(){
     var it = findItem(viewerItemId);
     closeViewer();
     if(it) openForm(it, null);
   });
-  document.getElementById("viewerDownload").addEventListener("click", downloadViewerImage);
-  document.getElementById("viewerShare").addEventListener("click", sharePrompt);
-  document.getElementById("viewerFavorite").addEventListener("click", function(){
+  onEl("viewerDownload", "click", downloadViewerImage);
+  onEl("viewerShare", "click", sharePrompt);
+  onEl("viewerFavorite", "click", function(){
     if(viewerItemId) toggleFavorite(viewerItemId);
   });
-  document.getElementById("viewerDelete").addEventListener("click", function(){
+  onEl("viewerDelete", "click", function(){
     var it = findItem(viewerItemId);
     closeViewer();
     if(it) moveToTrash(it);
   });
-  document.getElementById("fileInput").addEventListener("change", function(){
+  onEl("fileInput", "change", function(){
     var f = this.files && this.files[0];
     if(f) onFilePicked(f);
   });
-  document.getElementById("replaceBtn").addEventListener("click", function(){ document.getElementById("fileInput").click(); });
-  document.getElementById("removeBtn").addEventListener("click", function(){
+  onEl("replaceBtn", "click", function(){ var fi = document.getElementById("fileInput"); if(fi) fi.click(); });
+  onEl("removeBtn", "click", function(){
     pendingImage = null; pendingOriginal = null; pendingOriginalRemoved = true; pendingFingerprint = null;
     var prev = document.getElementById("preview");
-    prev.removeAttribute("src"); prev.style.display = "none";
-    document.getElementById("fileInput").value = "";
+    if(prev){ prev.removeAttribute("src"); prev.style.display = "none"; }
+    var fi = document.getElementById("fileInput");
+    if(fi) fi.value = "";
     showSavedName(null);
     updateImageBtns();
     toast("سيُحفظ البرومبت بلا صورة");
   });
-  document.getElementById("cancelBtn").addEventListener("click", closeForm);
-  document.getElementById("saveBtn").addEventListener("click", saveFormNow);
-  document.getElementById("titleInput").addEventListener("input", draftSave);
-  document.getElementById("promptInput").addEventListener("input", draftSave);
-  document.getElementById("backupFile").addEventListener("change", function(){
+  onEl("cancelBtn", "click", closeForm);
+  onEl("saveBtn", "click", saveFormNow);
+  onEl("titleInput", "input", draftSave);
+  onEl("promptInput", "input", draftSave);
+  onEl("backupFile", "change", function(){
     var f = this.files && this.files[0];
     this.value = "";
     if(f) importFile(f);
@@ -2640,7 +2719,10 @@ function bindUI(){
         if(cb) cb();
       }
       else if(isMenuOpen()) closeMenu();
-      else if(document.getElementById("viewer").classList.contains("show")) closeViewer();
+      else {
+        var vw = document.getElementById("viewer");
+        if(vw && vw.classList.contains("show")) closeViewer();
+      }
     }
   });
   bindMenuUI();
@@ -2651,17 +2733,17 @@ document.addEventListener("DOMContentLoaded", function(){
   bindUI();
   render();
   refreshEstimate();
+  watchGisScript();
   initGis();
   var granted = false;
   try{ granted = localStorage.getItem(SYNC_GRANT_KEY) === "1"; }catch(e){}
   if(granted){
-    var tries = 0;
-    var iv = setInterval(function(){
-      tries++;
-      if(tokenClient || tries > 20){ clearInterval(iv); if(tokenClient) signIn(false); }
-    }, 250);
+    onGisReadyOnce(function(){ if(!pendingSignIn) signIn(false); });
+    if(!ensureGisReady()) startGisPoll();
   } else {
-    document.getElementById("signinPage").classList.add("show");
+    var sp = document.getElementById("signinPage");
+    if(sp) sp.classList.add("show");
+    if(!ensureGisReady()) startGisPoll();
   }
 });
 </script>
