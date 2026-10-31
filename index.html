@@ -4,12 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>صوري وبرومبتاتي</title>
-<!-- Drive sync requires https (e.g. GitHub Pages). Sign-in will NOT work from file://. No secrets are stored in this file; the Web OAuth client ID is entered on-device in Sync settings. -->
+<!-- Drive sync requires https (e.g. GitHub Pages). Sign-in will NOT work from file://. The Web OAuth client ID baked into this page is a public identifier (it alone grants nothing); no secret is stored in this file. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 *{box-sizing:border-box}
 body{margin:0 auto;max-width:1100px;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif;background:#0a0d19;color:#f2f4fa}
-header{padding:16px 16px 8px}
+header{padding:16px 16px 8px;display:flex;gap:10px;align-items:flex-start}
+.header-text{flex:1;min-width:0}
+#menuBtn{flex:0 0 auto;padding:10px 13px;font-size:18px;line-height:1}
 h1{margin:0;font-size:22px}
 .sub{color:#9aa3b8;font-size:13px;margin-top:4px;line-height:1.6}
 .actions{display:flex;gap:6px;flex-wrap:nowrap;padding:12px 12px 4px}
@@ -47,20 +49,48 @@ body.locked{overflow:hidden}
 #viewer img{width:100%;border-radius:14px;max-height:62vh;object-fit:contain;background:#000}
 #viewer pre{white-space:pre-wrap;word-break:break-word;background:#121829;border:1px solid #2a3350;border-radius:12px;padding:13px;line-height:1.8;font-family:inherit;font-size:15px}
 .hint{color:#9aa3b8;font-size:12px;line-height:1.7;padding:0 16px 6px}
-#syncBox{background:#121829;border:1px solid #2a3350;border-radius:16px;margin:14px 16px;padding:14px}
-#syncBox h2{margin:0 0 8px;font-size:17px}
 .sync-status{color:#f5b942;font-size:13px;line-height:1.7;margin-bottom:10px;word-break:break-word}
-#syncBox input[type=text]{direction:ltr;text-align:left}
+#menuBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:44;display:none}
+#menuBackdrop.show{display:block}
+#sideMenu{position:fixed;top:0;right:0;height:100%;width:min(320px,86vw);background:#121829;border-inline-start:1px solid #2a3350;z-index:45;transform:translateX(105%);transition:transform .25s ease;padding:16px;overflow:auto}
+#sideMenu.open{transform:none}
+#sideMenu h2{margin:0;font-size:17px}
+#signinPage{display:none;min-height:100vh;padding:24px}
+#signinPage.show{display:flex;align-items:center;justify-content:center}
+#appPage{display:none}
+#appPage.show{display:block}
+.onboard-inner{max-width:420px;width:100%;text-align:center}
+.onboard-inner h2{margin:0 0 8px;font-size:22px}
+.onboard-inner p{color:#9aa3b8;font-size:14px;line-height:1.8;margin:0 0 22px}
+.onboard-btn{width:100%;padding:16px 14px;font-size:16px;margin-bottom:12px}
+.onboard-note{color:#9aa3b8;font-size:12px;line-height:1.7;margin-top:6px}
 .sync-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .sync-btns button{flex:1 1 auto}
 .sync-note{color:#9aa3b8;font-size:12px;line-height:1.7;margin:10px 0 0}
+.page-footer{text-align:center;padding:18px 16px 30px;color:#9aa3b8;font-size:13px}
+.page-footer a{color:#f5b942;text-decoration:none;margin:0 8px}
+#signinStatus{color:#f5b942;font-size:13px;line-height:1.7;min-height:22px;margin:0 0 14px}
 
 </style>
 </head>
 <body>
+<div id="signinPage" role="dialog" aria-label="تسجيل الدخول">
+  <div class="onboard-inner">
+    <h2>📷 صوري وبرومبتاتي</h2>
+    <p>سجّل دخول بحساب Google لعرض صورك وبرومبتاتك ومزامنتها مع Drive مالك. بدون تسجيل دخول ما يظهر أي شي هنا.</p>
+    <button type="button" class="btn-main onboard-btn" id="googleSignInBtn">🔑 المتابعة مع Google</button>
+    <p id="signinStatus" aria-live="polite"></p>
+    <p class="onboard-note">التزامن يرفع نسخة من صورك إلى مجلد خاص بالتطبيق في Drive مالك فقط، وما يگدر يشوف غيره أي ملف ثاني.</p>
+    <footer class="page-footer"><a href="privacy.html">سياسة الخصوصية</a> · <a href="terms.html">بنود الخدمة</a></footer>
+  </div>
+</div>
+<div id="appPage">
 <header>
+  <div class="header-text">
   <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة</span></h1>
   <div class="sub" id="countLine">لا توجد صور بعد.</div>
+  </div>
+  <button type="button" class="btn-ghost" id="menuBtn" aria-label="فتح قائمة التزامن">☰</button>
 </header>
 
 <div class="actions">
@@ -69,19 +99,20 @@ body.locked{overflow:hidden}
   <button class="btn-ghost" id="importBtn">⬆ استيراد نسخة</button>
 </div>
 <p class="hint">اضغط على البوستر لعرض البرومبت كاملاً.</p>
-<section id="syncBox">
-  <h2>☁️ تزامن Google Drive</h2>
+<div id="menuBackdrop"></div>
+<aside id="sideMenu" aria-label="قائمة التزامن">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px">
+    <h2>☁️ تزامن Google Drive</h2>
+    <button type="button" class="btn-ghost btn-small" id="menuCloseBtn" aria-label="إغلاق القائمة">✕</button>
+  </div>
   <div id="syncStatus" class="sync-status">التزامن غير مفعّل — سجّل دخول لتزامن صورك بين التلفون والحاسبة.</div>
-  <label for="clientIdInput">Client ID (يُحفظ على هذا الجهاز فقط)</label>
-  <input id="clientIdInput" type="text" placeholder="Client ID من Google Cloud" autocomplete="off" autocapitalize="off" spellcheck="false">
   <div class="sync-btns">
-    <button type="button" class="btn-ghost btn-small" id="saveClientIdBtn">💾 حفظ الـ Client ID</button>
     <button type="button" class="btn-main btn-small" id="signInBtn">🔑 تسجيل الدخول</button>
     <button type="button" class="btn-ghost btn-small" id="signOutBtn">🚪 تسجيل الخروج</button>
     <button type="button" class="btn-main btn-small" id="syncNowBtn">🔄 تزامن الآن</button>
   </div>
-  <p class="sync-note">التزامن يرفع نسخة من صورك إلى مجلد خاص بالتطبيق في Drive مالك فقط، وما يگدر يشوف غيره أي ملف ثاني. إذا عدّلت نفس الصورة بجهازين قبل التزامن، النسخة الأحدث هي اللي تفوز. بدون تسجيل دخول، التطبيق يشتغل محلياً مثل قبل تماماً. الصورة البديلة (المطر) ما تنرفع أبداً.</p>
-</section>
+  <p class="sync-note">التزامن يرفع نسخة من صورك إلى مجلد خاص بالتطبيق في Drive مالك فقط، وما يگدر يشوف غيره أي ملف ثاني. إذا عدّلت نفس الصورة بجهازين قبل التزامن، النسخة الأحدث هي اللي تفوز. تسجيل الخروج يمسح محتويات هالمتصفح ويرجعك لشاشة تسجيل الدخول. الصورة البديلة (المطر) ما تنرفع أبداً.</p>
+</aside>
 
 <input id="search" type="text" placeholder="ابحث بالعنوان أو بالبرومبت…">
 <input id="backupFile" type="file" accept=".json,application/json" style="display:none">
@@ -123,6 +154,8 @@ body.locked{overflow:hidden}
     <button class="btn-danger" id="viewerDelete" style="flex:1">🗑 حذف</button>
   </div>
 </div>
+<footer class="page-footer"><a href="privacy.html">سياسة الخصوصية</a> · <a href="terms.html">بنود الخدمة</a></footer>
+</div><!-- /appPage -->
 
 <script>
 "use strict";
@@ -204,8 +237,38 @@ function closeForm(){
   editingId = null; pendingImage = null;
   syncOverlay();
 }
+/* ---- Side menu (v1.6.1): sync actions live here, not in the main flow ---- */
+function isMenuOpen(){
+  var m = document.getElementById("sideMenu");
+  return !!(m && m.classList.contains("open"));
+}
+function openMenu(){
+  var m = document.getElementById("sideMenu"), b = document.getElementById("menuBackdrop");
+  if(m) m.classList.add("open");
+  if(b) b.classList.add("show");
+  document.body.classList.add("locked");
+  syncOverlay();
+}
+function closeMenu(){
+  var was = isMenuOpen();
+  var m = document.getElementById("sideMenu"), b = document.getElementById("menuBackdrop");
+  if(m) m.classList.remove("open");
+  if(b) b.classList.remove("show");
+  var v = document.getElementById("viewer");
+  if(!v || !v.classList.contains("show")) document.body.classList.remove("locked");
+  syncOverlay();
+  return was;
+}
+function bindMenuUI(){
+  var mb = document.getElementById("menuBtn");
+  if(mb) mb.addEventListener("click", openMenu);
+  var cb = document.getElementById("menuCloseBtn");
+  if(cb) cb.addEventListener("click", closeMenu);
+  var bd = document.getElementById("menuBackdrop");
+  if(bd) bd.addEventListener("click", closeMenu);
+}
 function syncOverlay(){
-  var open = document.getElementById("viewer").classList.contains("show") || document.getElementById("form").classList.contains("show");
+  var open = document.getElementById("viewer").classList.contains("show") || document.getElementById("form").classList.contains("show") || isMenuOpen();
   try{ if(window.PromptPicsNative && PromptPicsNative.setOverlayOpen) PromptPicsNative.setOverlayOpen(open); }catch(e){}
 }
 function closeViewer(){
@@ -360,7 +423,7 @@ document.getElementById("saveBtn").addEventListener("click", function(){
   closeForm(); render(); toast("تم الحفظ ✓"); afterLocalChange();
 });
 document.getElementById("closeViewer").addEventListener("click", function(){ closeViewer(); });
-document.addEventListener("keydown", function(e){ if(e.key === "Escape"){ closeViewer(); } });
+document.addEventListener("keydown", function(e){ if(e.key === "Escape"){ if(closeMenu()) return; closeViewer(); } });
 document.getElementById("viewerCopy").addEventListener("click", function(){ copyText(viewerPromptText); });
 document.getElementById("viewerEdit").addEventListener("click", function(){
   var found = null;
@@ -443,9 +506,11 @@ window.__importResult = function(json, err){
 /* ---- Drive sync: shared merge logic (identical on phone and PC) ---- */
 var SYNC_TOMB_KEY = "promptpics_v1_tombstones";
 var SYNC_FIRST_KEY = "promptpics_sync_first_done";
-var SYNC_WEB_CLIENT_KEY = "promptpics_sync_web_client";
 var SYNC_GRANT_KEY = "promptpics_sync_granted";
 var DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+var BAKED_WEB_CLIENT_ID = "308157456715-5fhn1m8ev46q536es52aqidh1rmtocup.apps.googleusercontent.com";
+var syncDirty = false;
+var autoSyncTimer = null;
 
 function loadTombs(){
   try{
@@ -550,7 +615,7 @@ function mergeSync(localItems, localTombs, remoteBodies, firstSync){
 }
 
 /* ---- Drive sync: orchestration (adapter supplied per platform) ---- */
-var syncBusy = false, syncSignedIn = false, syncFirstDone = false, syncClientId = "";
+var syncBusy = false, syncSignedIn = false, syncFirstDone = false;
 function syncSetStatus(msg){
   var el = document.getElementById("syncStatus");
   if(el) el.textContent = msg;
@@ -559,34 +624,24 @@ function syncErrorText(err){
   if(err === "not-signed-in") return "ما مسجّل دخول";
   if(err === "session-expired") return "انتهت الجلسة، سجّل دخول من جديد";
   if(err === "network") return "ما كو اتصال بالإنترنت";
-  if(err === "no-client-id") return "أدخل الـ Client ID أولاً";
   return (err || "خطأ غير معروف");
 }
 function syncRefreshUI(){
-  var input = document.getElementById("clientIdInput");
-  if(input && document.activeElement !== input) input.value = syncClientId;
   var si = document.getElementById("signInBtn"), so = document.getElementById("signOutBtn"), sn = document.getElementById("syncNowBtn");
   if(si) si.disabled = syncSignedIn || syncBusy;
   if(so) so.disabled = !syncSignedIn || syncBusy;
   if(sn) sn.disabled = !syncSignedIn || syncBusy;
+  /* Menu: sign-in shows only when signed out, sign-out only when signed in. */
+  if(si) si.style.display = syncSignedIn ? "none" : "";
+  if(so) so.style.display = syncSignedIn ? "" : "none";
 }
 function syncInit(){
   try{ syncFirstDone = localStorage.getItem(SYNC_FIRST_KEY) === "1"; }catch(e){ syncFirstDone = false; }
-  try{
-    var st = syncAdapter.getState();
-    syncClientId = (st && st.clientId) || "";
-    syncSignedIn = !!(st && st.signedIn);
-  }catch(e){ syncClientId = ""; syncSignedIn = false; }
+  syncSignedIn = false;
   syncRefreshUI();
-  if(syncSignedIn){
-    syncSetStatus(syncFirstDone ? "مسجّل دخول. اضغط «تزامن الآن» أو انتظر التزامن التلقائي." : "مسجّل دخول. اضغط «تزامن الآن» لأول مزامنة (راح نطلب تأكيدك أولاً).");
-    if(syncFirstDone) setTimeout(function(){ startSync(false); }, 2000);
-  } else if(syncClientId){
-    syncSetStatus("غير مسجّل دخول. اضغط «تسجيل الدخول» للتزامن.");
-    tryRestoreSession();
-  } else {
-    syncSetStatus(syncClientId ? "غير مسجّل دخول. اضغط «تسجيل الدخول» للتزامن." : "التزامن غير مفعّل — أدخل الـ Client ID الخاص بجهازك، احفظه، وبعدين سجّل دخول.");
-  }
+  syncSetStatus("سجّل دخول بحساب Google لعرض صورك ومزامنتها.");
+  setSigninStatus("سجّل دخول بحساب Google لعرض صورك وبرومبتاتك ومزامنتها مع Drive مالك.");
+  tryRestoreSession();
 }
 /* Silent session restore (v1.6): on page load, if this device previously
  * granted access, acquire a fresh token with prompt:"" — no popup. The token
@@ -601,10 +656,7 @@ function tryRestoreSession(){
     if(window.google && google.accounts && google.accounts.oauth2){
       syncAdapter.restoreSession(function(ok){
         if(!ok) return;
-        syncSignedIn = true;
-        syncRefreshUI();
-        syncSetStatus(syncFirstDone ? "مسجّل دخول. اضغط «تزامن الآن» أو انتظر التزامن التلقائي." : "مسجّل دخول. اضغط «تزامن الآن» لأول مزامنة (راح نطلب تأكيدك أولاً).");
-        if(syncFirstDone) setTimeout(function(){ startSync(false); }, 2000);
+        enterSignedIn(false);
       });
       return;
     }
@@ -612,23 +664,42 @@ function tryRestoreSession(){
     if(attempts < 10) setTimeout(attempt, 500);
   })();
 }
+/* Auth watchdog (v1.6.1): sign-in must answer. If nothing answers
+ * within 20s, show a clear error and reset — never wait forever. A
+ * success that arrives late still wins; a stale failure is ignored. */
+var authAttempt = 0, authPending = false, authTimer = null;
+function clearAuthTimer(){ if(authTimer !== null){ try{ clearTimeout(authTimer); }catch(e){} authTimer = null; } }
+function onAuthTimeout(attempt){
+  if(!authPending || attempt !== authAttempt) return;
+  authPending = false; authTimer = null;
+  syncSignedIn = false;
+  syncRefreshUI();
+  syncSetStatus("تعذّر فتح نافذة تسجيل الدخول — اسمح بالنوافذ المنبثقة لهذا الموقع وتأكد من الاتصال، وبعدين حاول من جديد.");
+  setSigninStatus("تعذّر فتح نافذة تسجيل الدخول — اسمح بالنوافذ المنبثقة لهذا الموقع وتأكد من الاتصال، وبعدين حاول من جديد.");
+}
 function onAuthResult(ok, msg){
   if(ok){
-    syncSignedIn = true;
-    syncRefreshUI();
-    syncSetStatus("تم تسجيل الدخول ✓ — اضغط «تزامن الآن» لأول مزامنة.");
+    clearAuthTimer();
+    authPending = false;
+    enterSignedIn(true);
     toast("تم تسجيل الدخول ✓");
   } else {
+    if(!authPending) return;
+    clearAuthTimer();
+    authPending = false;
     syncSignedIn = false;
     syncRefreshUI();
     syncSetStatus("ما تم تسجيل الدخول: " + (msg || "أُلغي أو فشل."));
+    setSigninStatus("ما تم تسجيل الدخول: " + (msg || "أُلغي أو فشل."));
   }
 }
 function onSignOutResult(ok, msg){
   syncSignedIn = false;
   syncBusy = false;
   syncRefreshUI();
-  syncSetStatus("تم تسجيل الخروج. بياناتك المحلية باقية مثل ما هي.");
+  showSigninPage();
+  syncSetStatus("تم تسجيل الخروج. محتويات هالمتصفح انمسحت، وسجّل دخول من جديد لعرض صورك.");
+  setSigninStatus("");
 }
 function startSync(manual){
   if(syncBusy) return;
@@ -639,6 +710,7 @@ function startSync(manual){
     exportBackupNow();
   }
   syncBusy = true;
+  clearAutoSyncTimer();
   syncRefreshUI();
   syncSetStatus("جارٍ التزامن…");
   var tombs = loadTombs();
@@ -688,6 +760,7 @@ function startSync(manual){
 }
 function finishSync(upCount, downCount){
   syncBusy = false;
+  syncDirty = false;
   if(!syncFirstDone){
     syncFirstDone = true;
     try{ localStorage.setItem(SYNC_FIRST_KEY, "1"); }catch(e){}
@@ -697,28 +770,28 @@ function finishSync(upCount, downCount){
   syncRefreshUI();
   syncSetStatus("آخر تزامن: " + p(d.getHours()) + ":" + p(d.getMinutes()) + " — رُفع " + upCount + "، نزل " + downCount + ".");
 }
+function clearAutoSyncTimer(){ if(autoSyncTimer !== null){ try{ clearTimeout(autoSyncTimer); }catch(e){} autoSyncTimer = null; } }
 function afterLocalChange(){
-  if(syncSignedIn && syncFirstDone && !syncBusy) startSync(false);
+  syncDirty = true;
+  if(!syncSignedIn || !syncFirstDone || syncBusy) return;
+  clearAutoSyncTimer();
+  autoSyncTimer = setTimeout(function(){
+    autoSyncTimer = null;
+    if(syncSignedIn && syncFirstDone && !syncBusy) startSync(false);
+  }, 1500);
 }
 function bindSyncUI(){
-  document.getElementById("saveClientIdBtn").addEventListener("click", function(){
-    var v = document.getElementById("clientIdInput").value.trim();
-    syncAdapter.setClientId(v);
-    syncClientId = v;
-    syncRefreshUI();
-    toast(v ? "تم حفظ الـ Client ID على هذا الجهاز." : "تم مسح الـ Client ID.");
-    if(v && !syncSignedIn) syncSetStatus("تم الحفظ. اضغط «تسجيل الدخول» للتزامن.");
+  var gb = document.getElementById("googleSignInBtn");
+  if(gb) gb.addEventListener("click", function(){
+    setSigninStatus("جارٍ فتح نافذة تسجيل الدخول…");
+    syncAdapter.startAuth();
   });
   document.getElementById("signInBtn").addEventListener("click", function(){
-    if(!syncClientId && !document.getElementById("clientIdInput").value.trim()){
-      syncSetStatus("أدخل الـ Client ID أولاً واحفظه، وبعدين سجّل دخول.");
-      return;
-    }
-    syncSetStatus("جارٍ فتح المتصفح لتسجيل الدخول…");
+    syncSetStatus("جارٍ فتح نافذة تسجيل الدخول…");
     syncAdapter.startAuth();
   });
   document.getElementById("signOutBtn").addEventListener("click", function(){
-    syncAdapter.signOut();
+    handleSignOut();
   });
   document.getElementById("syncNowBtn").addEventListener("click", function(){ startSync(true); });
   setInterval(function(){
@@ -734,23 +807,10 @@ function bindSyncUI(){
 var syncAdapter = {
   _token: null, _expiry: 0, _remoteMap: {},
   getState: function(){
-    var id = "";
-    try{ id = localStorage.getItem(SYNC_WEB_CLIENT_KEY) || ""; }catch(e){}
-    return { clientId: id, signedIn: !!this._token };
-  },
-  setClientId: function(id){
-    try{
-      if(id) localStorage.setItem(SYNC_WEB_CLIENT_KEY, id);
-      else localStorage.removeItem(SYNC_WEB_CLIENT_KEY);
-    }catch(e){}
-  },
-  _clientId: function(){
-    var id = "";
-    try{ id = (localStorage.getItem(SYNC_WEB_CLIENT_KEY) || "").trim(); }catch(e){}
-    return id;
+    return { signedIn: !!this._token };
   },
   _tokenClient: function(promptMode, cb){
-    var self = this, id = self._clientId();
+    var self = this, id = BAKED_WEB_CLIENT_ID;
     if(!id){ cb(null); return; }
     if(!window.google || !google.accounts || !google.accounts.oauth2){
       cb(null); return;
@@ -773,7 +833,11 @@ var syncAdapter = {
   },
   startAuth: function(){
     var self = this;
-    if(!self._clientId()){ onAuthResult(false, "أدخل الـ Client ID أولاً."); return; }
+    authAttempt++;
+    authPending = true;
+    clearAuthTimer();
+    var attempt = authAttempt;
+    authTimer = setTimeout(function(){ onAuthTimeout(attempt); }, 20000);
     if(!window.google || !google.accounts){
       onAuthResult(false, "ما تحملت مكتبة Google — تحقق من الاتصال وحدّث الصفحة.");
       return;
@@ -791,7 +855,7 @@ var syncAdapter = {
     if(self._token){ cb(true); return; }
     var granted = false;
     try{ granted = localStorage.getItem(SYNC_GRANT_KEY) === "1"; }catch(e){}
-    if(!granted || !self._clientId()){ cb(false); return; }
+    if(!granted){ cb(false); return; }
     self._tokenClient("", function(tok){ cb(!!tok); });
   },
   signOut: function(){
@@ -929,11 +993,69 @@ var syncAdapter = {
   }
 };
 
-bindSyncUI();
-syncInit();
+/* ---- Gated sign-in (v2): the site shows NOTHING until the user signs
+ * in with Google. The sign-in screen is the only visible state while
+ * signed out; the app page appears only after sign-in (interactive or
+ * silent restore). Signing out wipes this browser's copy of the
+ * previous account's library. */
+function setSigninStatus(msg){
+  var el = document.getElementById("signinStatus");
+  if(el) el.textContent = msg || "";
+}
+function showSigninPage(){
+  var o = document.getElementById("signinPage"), a = document.getElementById("appPage");
+  if(o) o.classList.add("show");
+  if(a) a.classList.remove("show");
+}
+function showAppPage(){
+  var o = document.getElementById("signinPage"), a = document.getElementById("appPage");
+  if(o) o.classList.remove("show");
+  if(a) a.classList.add("show");
+}
+function enterSignedIn(interactive){
+  syncSignedIn = true;
+  items = load();
+  try{
+    if(!syncFirstDone && (items.length > 0 || loadTombs().length > 0)) syncDirty = true;
+  }catch(e){}
+  render();
+  syncRefreshUI();
+  showAppPage();
+  setSigninStatus("");
+  if(interactive){
+    syncSetStatus("تم تسجيل الدخول ✓ — جارٍ التزامن…");
+    setTimeout(function(){ startSync(true); }, 400);
+  } else {
+    syncSetStatus(syncFirstDone ? "مسجّل دخول. اضغط «تزامن الآن» أو انتظر التزامن التلقائي." : "مسجّل دخول. اضغط «تزامن الآن» لأول مزامنة (راح نطلب تأكيدك أولاً).");
+    if(syncFirstDone) setTimeout(function(){ startSync(false); }, 2000);
+  }
+}
+function handleSignOut(){
+  if(syncDirty || (!syncFirstDone && (items.length > 0 || loadTombs().length > 0))){
+    if(!confirm("تسجيل الخروج راح يمسح الصور والبرومبتات الموجودة على هالمتصفح واللي ما انرفعت لـ Drive بعد. إذا كانت مزامَنة أصلاً، راح ترجع تنزل من Drive من تسجّل دخول. تريد تكمل وتسجّل خروج؟")) return;
+  }
+  clearAutoSyncTimer();
+  items = [];
+  try{
+    localStorage.removeItem(KEY);
+    localStorage.removeItem(SYNC_TOMB_KEY);
+    localStorage.removeItem(SYNC_FIRST_KEY);
+  }catch(e){}
+  syncFirstDone = false;
+  syncDirty = false;
+  closeMenu();
+  closeViewer();
+  closeForm();
+  render();
+  syncAdapter.signOut();
+}
 
-items = load();
+bindSyncUI();
+bindMenuUI();
+showSigninPage();
+items = [];
 render();
+syncInit();
 </script>
 </body>
 </html>
