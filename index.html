@@ -2057,7 +2057,7 @@ function refreshToken(){
       var hint = "";
       try{ hint = localStorage.getItem(SYNC_HINT_KEY) || ""; }catch(e){}
       if(!tokenClient){ resolve(false); return; }
-      tokenClient.requestAccessToken({ prompt: "", hint: hint || undefined });
+      tokenClient.requestAccessToken({ prompt: "none", hint: hint || undefined });
       var tries = 0;
       var iv = setInterval(function(){
         tries++;
@@ -2451,8 +2451,11 @@ function initGis(){
           var st = document.getElementById("signinStatus");
           if(st) st.textContent = "";
           if(!signedInUI) onSignedIn();
-        } else if(lastAuthManual){
-          toast("ما تم تسجيل الدخول. جرّب من جديد.");
+        } else {
+          if(authWatchdog){ clearTimeout(authWatchdog); authWatchdog = null; }
+          if(lastAuthManual){
+            toast("ما تم تسجيل الدخول. جرّب من جديد.");
+          }
         }
       }
     });
@@ -2475,13 +2478,16 @@ function signIn(manual){
     var hint = "";
     try{ hint = localStorage.getItem(SYNC_HINT_KEY) || ""; }catch(e){}
     if(authWatchdog) clearTimeout(authWatchdog);
-    authWatchdog = setTimeout(function(){
-      if(!accessToken) toast("انتهت مهلة تسجيل الدخول. جرّب من جديد.");
-    }, 20000);
-    var st = document.getElementById("signinStatus");
-    if(st) st.textContent = "جارٍ تسجيل الدخول…";
+    authWatchdog = null;
+    if(manual){
+      authWatchdog = setTimeout(function(){
+        if(!accessToken) toast("انتهت مهلة تسجيل الدخول. جرّب من جديد.");
+      }, 20000);
+      var st = document.getElementById("signinStatus");
+      if(st) st.textContent = "جارٍ تسجيل الدخول…";
+    }
     if(manual || !hint) tokenClient.requestAccessToken({ prompt: "consent" });
-    else tokenClient.requestAccessToken({ prompt: "", hint: hint });
+    else tokenClient.requestAccessToken({ prompt: "none", hint: hint });
   }catch(e){ toast("ما تم تسجيل الدخول. جرّب من جديد."); }
 }
 function onSignedIn(){
