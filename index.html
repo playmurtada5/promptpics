@@ -43,7 +43,7 @@ textarea{min-height:110px;resize:vertical;line-height:1.7}
 .noimg-sign{position:absolute;bottom:6px;right:8px;color:#e8c25a;font-family:"Segoe Script","Brush Script MT",cursive;font-style:italic;font-size:14px;text-shadow:0 1px 3px rgba(0,0,0,.65);pointer-events:none}
 #viewer .noimg-badge{font-size:15px;bottom:42px;padding:6px 13px}
 #viewer .noimg-sign{font-size:24px;bottom:10px;right:12px}
-#grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:12px 12px 30px}
+#grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;padding:12px 12px 30px}
 @media (max-width:480px){#grid{grid-template-columns:repeat(2,1fr)}}
 .card{background:#1c2338;border:1px solid #2a3350;border-radius:12px;overflow:hidden}
 .card img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;cursor:pointer;background:#000}
@@ -116,7 +116,7 @@ body.locked{overflow:hidden}
 <div id="appPage">
 <header>
   <div class="header-text">
-  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.5</span></h1>
+  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.6</span></h1>
   <div class="sub" id="countLine">لا توجد صور بعد.</div>
   </div>
   <button type="button" class="btn-ghost" id="menuBtn" aria-label="فتح القائمة">☰</button>
@@ -2621,7 +2621,7 @@ function showStatus(){
   var kb = estimateKB != null ? estimateKB : storageKB();
   var account = accessToken ? "مسجّل دخول ✓" : "غير مسجّل دخول";
   showModal({
-    title: "صوري وبرومبتاتي 3.2.5 — نسخة الحاسبة",
+    title: "صوري وبرومبتاتي 3.2.6 — نسخة الحاسبة",
     message: "عناصر: " + c.live + "\nالمفضلة: " + c.fav + "\nمحذوفات: " + c.trash + "\nحجم الحفظ التقريبي: " + kb + " كيلوبايت\nالحساب: " + account + "\n" + lastSyncText,
     buttons: [{ label: "حسناً", kind: "main" }]
   });
