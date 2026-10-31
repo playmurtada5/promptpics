@@ -2160,10 +2160,13 @@ function validateRemoteBody(text, fileName){
 }
 function updateSyncStatus(){
   var el = document.getElementById("syncStatus");
-  if(!el) return;
-  el.textContent = accessToken
+  if(el) el.textContent = accessToken
     ? "مسجّل دخول ✓ — " + lastSyncText
     : "التزامن غير مفعّل — سجّل دخول لتزامن صورك بين التلفون والحاسبة.";
+  var si = document.getElementById("signInBtn");
+  if(si) si.style.display = accessToken ? "none" : "";
+  var so = document.getElementById("signOutBtn");
+  if(so) so.style.display = accessToken ? "" : "none";
 }
 function startSync(manual){
   if(syncRunning){ if(manual) toast("التزامن جارٍ الآن…"); return Promise.resolve(false); }
@@ -2735,6 +2738,7 @@ document.addEventListener("DOMContentLoaded", function(){
   refreshEstimate();
   watchGisScript();
   initGis();
+  updateSyncStatus();
   var granted = false;
   try{ granted = localStorage.getItem(SYNC_GRANT_KEY) === "1"; }catch(e){}
   if(granted){
