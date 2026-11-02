@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>صوري وبرومبتاتي</title>
-<!-- PromptPics PC v3.2.10 — parity with the native Kotlin app v3.2 (same pattern, same specs), Character tab + review grid.
+<!-- PromptPics PC v3.2.11 — parity with the native Kotlin app v3.2 (same pattern, same specs), Character tab + review grid.
      Drive sync requires https (e.g. GitHub Pages). Sign-in will NOT work from file://.
      The Web OAuth client ID baked into this page is a public identifier (it alone grants nothing); no secret is stored in this file. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -134,7 +134,7 @@ body.locked{overflow:hidden}
 <div id="appPage">
 <header>
   <div class="header-text">
-  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.10</span></h1>
+  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.11</span></h1>
   <div class="sub" id="countLine">لا توجد صور بعد.</div>
   </div>
   <button type="button" class="btn-ghost" id="menuBtn" aria-label="فتح القائمة">☰</button>
@@ -786,7 +786,7 @@ function idbClearStore(storeName){
 function idbClear(){
   return Promise.all([idbClearStore(IDB_STORE), idbClearStore(IDB_PREVIEW_STORE)]).then(function(){ return true; });
 }
-/* ---- Shared storage keys (v3.2.10): one original + one preview per
+/* ---- Shared storage keys (v3.2.11): one original + one preview per
  * identity. origHash (FNV-1a over the Base64 payload, unchanged) is
  * the key in BOTH IndexedDB stores when present. Legacy items
  * without origHash share a preview only when their preview strings
@@ -1117,7 +1117,7 @@ function origGetPayload(key, cb){
 function origPutPayload(key, payload, meta, cb){
   idbPut(key, payloadToBlob(payload, (meta && meta.origMime) || "")).then(function(ok){ cb(!!ok); }, function(){ cb(false); });
 }
-/* Originals are stored under the origHash key (v3.2.10 shared
+/* Originals are stored under the origHash key (v3.2.11 shared
  * storage). Reads fall back to the legacy per-item key so bytes
  * written by the previous version remain reachable until the migration re-keys
  * them. */
@@ -3144,21 +3144,120 @@ var syncing = false;
 var lastSyncText = "لم تتم مزامنة بعد.";
 var syncRunning = false;
 var SYNC_RETRY_KEY = "promptpics_sync_retry";
+/* ---- Drive request timeouts (v3.2.11): every Drive fetch runs under
+   an AbortController + budget, so one stalled request rejects instead
+   of hanging the strictly-sequential sync chain forever. Listing/JSON
+   calls get a 120s total budget. Media downloads get a 15-minute total
+   cap plus a 60s activity budget: the body stream is wrapped so the
+   timer resets on every chunk and fires only when bytes stop flowing
+   -- a healthy slow transfer is never cut off. Uploads get the
+   15-minute total budget (their bodies can be multi-megabyte Blobs).
+   Each attempt (including the 401 retry) gets a fresh controller and
+   fresh timers. Callers are untouched: rejections flow into the
+   existing .catch paths (skip item / uploadFailed / top-level retry
+   toast + syncRunning reset). */
+var DRIVE_JSON_TIMEOUT_MS = 120000;
+var DRIVE_MEDIA_ACTIVITY_MS = 60000;
+var DRIVE_MEDIA_TOTAL_MS = 900000;
+function driveWrapResponse(res, controller, started, totalMs, activityMs){
+  var body = res ? res.body : null;
+  if(!body || typeof body.getReader !== "function") return res;
+  if(typeof ReadableStream === "undefined" || typeof Response === "undefined") return res;
+  var reader;
+  try{ reader = body.getReader(); }catch(e){ return res; }
+  var streamCtrl = null;
+  var timer = null;
+  var finished = false;
+  function clearTimer(){ if(timer){ clearTimeout(timer); timer = null; } }
+  function fail(err){
+    if(finished) return;
+    finished = true;
+    clearTimer();
+    try{ reader.cancel(); }catch(e){}
+    if(streamCtrl){ try{ streamCtrl.error(err); }catch(e){} }
+  }
+  function arm(){
+    clearTimer();
+    timer = setTimeout(function(){
+      if(controller){ try{ controller.abort(); }catch(e){} }
+      fail(new Error("timeout"));
+    }, activityMs);
+  }
+  var stream;
+  try{
+    stream = new ReadableStream({
+      start: function(c){ streamCtrl = c; arm(); },
+      pull: function(c){
+        return reader.read().then(function(r){
+          if(finished) return;
+          if(r.done){ finished = true; clearTimer(); c.close(); return; }
+          if(Date.now() - started > totalMs){ fail(new Error("timeout")); return; }
+          arm();
+          c.enqueue(r.value);
+        }, function(err){
+          if(!finished){ finished = true; clearTimer(); c.error(err); }
+        });
+      },
+      cancel: function(){ finished = true; clearTimer(); try{ return reader.cancel(); }catch(e){} }
+    });
+  }catch(e){ return res; }
+  try{
+    return new Response(stream, { status: res.status, statusText: res.statusText || "", headers: res.headers });
+  }catch(e){ return res; }
+}
+function driveFetchOnce(url, fetchOpts, isMedia){
+  var controller = null;
+  try{ if(typeof AbortController !== "undefined") controller = new AbortController(); }catch(e){ controller = null; }
+  var opts = { method: fetchOpts.method || "GET", headers: fetchOpts.headers, body: fetchOpts.body };
+  if(controller) opts.signal = controller.signal;
+  var totalMs = isMedia ? DRIVE_MEDIA_TOTAL_MS : DRIVE_JSON_TIMEOUT_MS;
+  var activityMs = DRIVE_MEDIA_ACTIVITY_MS;
+  var started = Date.now();
+  var timer = null;
+  var timeoutPromise = new Promise(function(resolve, reject){
+    timer = setTimeout(function(){
+      if(controller){ try{ controller.abort(); }catch(e){} }
+      reject(new Error("timeout"));
+    }, totalMs);
+  });
+  var raced;
+  try{
+    raced = Promise.race([fetch(url, opts), timeoutPromise]);
+  }catch(e){
+    if(timer) clearTimeout(timer);
+    return Promise.reject(e);
+  }
+  return raced.then(function(res){
+    if(timer) clearTimeout(timer);
+    return driveWrapResponse(res, controller, started, totalMs, activityMs);
+  }, function(err){
+    if(timer) clearTimeout(timer);
+    throw err;
+  });
+}
 function driveApi(path, opts){
   opts = opts || {};
+  var isMedia = path.indexOf("alt=media") !== -1;
   var headers = { "Authorization": "Bearer " + accessToken };
   if(opts.contentType) headers["Content-Type"] = opts.contentType;
-  return fetch("https://www.googleapis.com/drive/v3/" + path, {
-    method: opts.method || "GET",
-    headers: headers,
-    body: opts.body
-  }).then(function(res){
+  function attempt(){
+    return driveFetchOnce("https://www.googleapis.com/drive/v3/" + path, {
+      method: opts.method || "GET",
+      headers: headers,
+      body: opts.body
+    }, isMedia);
+  }
+  return attempt().then(function(res){
     if(res.status === 401){
       return refreshToken().then(function(ok){
         if(!ok) throw new Error("session");
         var h2 = { "Authorization": "Bearer " + accessToken };
         if(opts.contentType) h2["Content-Type"] = opts.contentType;
-        return fetch("https://www.googleapis.com/drive/v3/" + path, { method: opts.method || "GET", headers: h2, body: opts.body });
+        return driveFetchOnce("https://www.googleapis.com/drive/v3/" + path, {
+          method: opts.method || "GET",
+          headers: h2,
+          body: opts.body
+        }, isMedia);
       });
     }
     return res;
@@ -3168,17 +3267,24 @@ function driveUpload(path, opts){
   opts = opts || {};
   var headers = { "Authorization": "Bearer " + accessToken };
   if(opts.contentType) headers["Content-Type"] = opts.contentType;
-  return fetch("https://www.googleapis.com/upload/drive/v3/" + path, {
-    method: opts.method || "POST",
-    headers: headers,
-    body: opts.body
-  }).then(function(res){
+  function attempt(){
+    return driveFetchOnce("https://www.googleapis.com/upload/drive/v3/" + path, {
+      method: opts.method || "POST",
+      headers: headers,
+      body: opts.body
+    }, true);
+  }
+  return attempt().then(function(res){
     if(res.status === 401){
       return refreshToken().then(function(ok){
         if(!ok) throw new Error("session");
         var h2 = { "Authorization": "Bearer " + accessToken };
         if(opts.contentType) h2["Content-Type"] = opts.contentType;
-        return fetch("https://www.googleapis.com/upload/drive/v3/" + path, { method: opts.method || "POST", headers: h2, body: opts.body });
+        return driveFetchOnce("https://www.googleapis.com/upload/drive/v3/" + path, {
+          method: opts.method || "POST",
+          headers: h2,
+          body: opts.body
+        }, true);
       });
     }
     return res;
@@ -3389,6 +3495,11 @@ function startSync(manual){
     var outcome = mergeRemote(ctx.remoteBodies, items, tombs, ctx.dirty, !ctx.firstDoneBefore);
     items = outcome.items;
     saveTombs(outcome.tombs);
+    /* v3.2.11: persist merged bodies BEFORE the companion phase, so a
+       reload during companion work boots with the merged items instead
+       of restarting from the pre-sync state. The final block saves
+       again; dirty-flag handling below is unchanged. */
+    save();
     Object.keys(preMergeIds).forEach(function(id){
       var cur = findItem(id);
       if(!cur){ releaseBytesForSnapshot(preMergeSnaps[id]); return; }
@@ -3875,7 +3986,7 @@ function showStatus(){
   var kb = estimateKB != null ? estimateKB : storageKB();
   var account = accessToken ? "مسجّل دخول ✓" : "غير مسجّل دخول";
   showModal({
-    title: "صوري وبرومبتاتي 3.2.10 — نسخة الحاسبة",
+    title: "صوري وبرومبتاتي 3.2.11 — نسخة الحاسبة",
     message: "عناصر: " + c.live + "\nالمفضلة: " + c.fav + "\nمحذوفات: " + c.trash + "\nمراجع الشخصية: " + c.refs + "\nحجم الحفظ التقريبي: " + kb + " كيلوبايت\nالحساب: " + account + "\n" + lastSyncText,
     buttons: [{ label: "حسناً", kind: "main" }]
   });
