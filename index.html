@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>صوري وبرومبتاتي</title>
-<!-- PromptPics PC v3.2.7 — parity with the native Kotlin app v3.2 (same pattern, same specs), Character tab + review grid.
+<!-- PromptPics PC v3.2.8 — parity with the native Kotlin app v3.2 (same pattern, same specs), Character tab + review grid.
      Drive sync requires https (e.g. GitHub Pages). Sign-in will NOT work from file://.
      The Web OAuth client ID baked into this page is a public identifier (it alone grants nothing); no secret is stored in this file. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -46,7 +46,7 @@ textarea{min-height:110px;resize:vertical;line-height:1.7}
 #grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;padding:12px 12px 30px}
 @media (max-width:480px){#grid{grid-template-columns:repeat(2,1fr)}}
 .tabcount{grid-column:1/-1;color:#9aa3b8;font-size:13px;line-height:1.7;padding:2px 4px 0}
-/* Review grid (v3.2.7): same 5-column poster styling as the library grid;
+/* Review grid: same 5-column poster styling as the library grid;
  * existing tiles are dimmed and unselectable, with «موجودة ✓» in place
  * of the file name. */
 #reviewSection{display:none;margin-top:12px}
@@ -134,7 +134,7 @@ body.locked{overflow:hidden}
 <div id="appPage">
 <header>
   <div class="header-text">
-  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.7</span></h1>
+  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.8</span></h1>
   <div class="sub" id="countLine">لا توجد صور بعد.</div>
   </div>
   <button type="button" class="btn-ghost" id="menuBtn" aria-label="فتح القائمة">☰</button>
@@ -572,6 +572,15 @@ function itemToJson(it){
   if(f){ o.origName = f.origName; o.origMime = f.origMime; o.origSize = f.origSize; o.origHash = f.origHash; }
   return o;
 }
+/* Metadata-only form for localStorage: the preview (image) lives in
+ * IndexedDB, so the stored JSON stays small no matter how many items
+ * the library holds. Sync bodies and exports still use the full form
+ * (itemToJson / itemToSyncBody) with the preview included. */
+function itemToStoredJson(it){
+  var o = itemToJson(it);
+  o.image = "";
+  return o;
+}
 function itemToSyncBody(it, deleted){
   var body = {
     id: it.id,
@@ -611,12 +620,13 @@ function load(){
 }
 function save(){
   try{
-    localStorage.setItem(KEY, JSON.stringify(items.map(itemToJson)));
-    return true;
+    localStorage.setItem(KEY, JSON.stringify(items.map(itemToStoredJson)));
   }catch(e){
     toast("المساحة امتلأت. احذف صورة أو صدّر نسخة احتياطية ثم احذف بعض الصور.");
     return false;
   }
+  queuePreviewPersist();
+  return true;
 }
 function storageKB(){
   try{ return Math.round(((localStorage.getItem(KEY) || "").length * 2) / 1024); }
@@ -684,25 +694,37 @@ function loadConflicts(){
 function saveConflict(item){
   try{
     var list = loadConflicts();
-    list.unshift({ itemId: item.id, bodyJson: JSON.stringify(itemToJson(item)), savedAt: Date.now() });
+    list.unshift({ itemId: item.id, bodyJson: JSON.stringify(itemToStoredJson(item)), savedAt: Date.now() });
     localStorage.setItem(CONFLICTS_KEY, JSON.stringify(list));
   }catch(e){}
 }
 function saveConflicts(list){
   try{ localStorage.setItem(CONFLICTS_KEY, JSON.stringify(list)); }catch(e){}
 }
-/* ---- Original-file storage (PC): IndexedDB "promptpics" / "originals".
- * Render never waits for IndexedDB; every helper degrades to null/false
- * when IndexedDB is unavailable, and saves proceed preview-only. ---- */
-var IDB_DB = "promptpics", IDB_STORE = "originals", _idbPromise = null, _idbFailed = false;
+/* ---- IndexedDB storage (PC): DB "promptpics", stores "originals" and
+ * "previews". localStorage holds item metadata only; previews live in
+ * the "previews" store so a large library never exceeds the
+ * localStorage quota. Every helper degrades to null/false when
+ * IndexedDB is unavailable; in-memory items always carry their
+ * preview, and the next sync re-downloads any preview missing locally. ---- */
+var IDB_DB = "promptpics", IDB_STORE = "originals", IDB_PREVIEW_STORE = "previews", IDB_VERSION = 2, _idbPromise = null, _idbFailed = false;
+var PREVIEW_MIGRATION_KEY = "promptpics_previews_migrated_v1";
+var persistedPreview = {};
+var previewPersistChain = Promise.resolve();
+var previewPersistFailed = false;
 function idbOpen(){
   if(_idbPromise) return _idbPromise;
   _idbPromise = new Promise(function(resolve){
     try{
       if(typeof indexedDB === "undefined"){ _idbFailed = true; resolve(null); return; }
-      var req = indexedDB.open(IDB_DB, 1);
+      var req = indexedDB.open(IDB_DB, IDB_VERSION);
       req.onupgradeneeded = function(){
-        try{ if(req.result && !req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE); }catch(e){}
+        try{
+          if(req.result){
+            if(!req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE);
+            if(!req.result.objectStoreNames.contains(IDB_PREVIEW_STORE)) req.result.createObjectStore(IDB_PREVIEW_STORE);
+          }
+        }catch(e){}
       };
       req.onsuccess = function(){ resolve(req.result || null); };
       req.onerror = function(){ _idbFailed = true; resolve(null); };
@@ -711,13 +733,13 @@ function idbOpen(){
   });
   return _idbPromise;
 }
-function idbTx(mode, fn){
+function idbTxFor(storeName, mode, fn){
   return idbOpen().then(function(db){
     if(!db) return null;
     return new Promise(function(resolve){
       try{
-        var tx = db.transaction(IDB_STORE, mode);
-        var store = tx.objectStore(IDB_STORE);
+        var tx = db.transaction(storeName, mode);
+        var store = tx.objectStore(storeName);
         var req = fn(store);
         if(!req){ resolve(null); return; }
         req.onsuccess = function(){ resolve(req.result); };
@@ -726,6 +748,9 @@ function idbTx(mode, fn){
       }catch(e){ resolve(null); }
     });
   });
+}
+function idbTx(mode, fn){
+  return idbTxFor(IDB_STORE, mode, fn);
 }
 function idbGet(id){
   return idbTx("readonly", function(s){ return s.get(id); }).then(function(v){ return v || null; });
@@ -737,8 +762,84 @@ function idbPut(id, blob){
 function idbDelete(id){
   return idbTx("readwrite", function(s){ return s.delete(id); }).then(function(){ return true; });
 }
+function idbGetFrom(storeName, id){
+  return idbTxFor(storeName, "readonly", function(s){ return s.get(id); }).then(function(v){ return v || null; });
+}
+function idbPutTo(storeName, id, value){
+  if(!value) return Promise.resolve(false);
+  return idbTxFor(storeName, "readwrite", function(s){ return s.put(value, id); }).then(function(v){ return v !== null; });
+}
+function idbDeleteFrom(storeName, id){
+  return idbTxFor(storeName, "readwrite", function(s){ return s.delete(id); }).then(function(){ return true; });
+}
+function idbClearStore(storeName){
+  return idbTxFor(storeName, "readwrite", function(s){ return s.clear(); }).then(function(){ return true; });
+}
 function idbClear(){
-  return idbTx("readwrite", function(s){ return s.clear(); }).then(function(){ return true; });
+  return Promise.all([idbClearStore(IDB_STORE), idbClearStore(IDB_PREVIEW_STORE)]).then(function(){ return true; });
+}
+function previewGet(id){ return idbGetFrom(IDB_PREVIEW_STORE, id); }
+function previewPutOnce(id, dataUrl){ return idbPutTo(IDB_PREVIEW_STORE, id, dataUrl); }
+function previewPut(id, dataUrl){
+  return previewPutOnce(id, dataUrl).then(function(ok){
+    if(ok) return true;
+    return previewPutOnce(id, dataUrl);
+  });
+}
+function previewDelete(id){ return idbDeleteFrom(IDB_PREVIEW_STORE, id); }
+function deleteLocalPreview(id){ previewDelete(id); delete persistedPreview[id]; }
+function persistAllPreviews(){
+  var work = [];
+  items.forEach(function(it){
+    var img = it.image || "";
+    if(!img){
+      if(persistedPreview[it.id] !== undefined) work.push({ id: it.id, image: "" });
+      return;
+    }
+    if(persistedPreview[it.id] === img) return;
+    work.push({ id: it.id, image: img });
+  });
+  if(!work.length) return Promise.resolve(false);
+  var failed = false;
+  var chain = Promise.resolve();
+  work.forEach(function(w){
+    chain = chain.then(function(){
+      if(!w.image){ return previewDelete(w.id).then(function(){ delete persistedPreview[w.id]; }); }
+      return previewPut(w.id, w.image).then(function(ok){
+        if(ok) persistedPreview[w.id] = w.image;
+        else failed = true;
+      });
+    });
+  });
+  return chain.then(function(){ return failed; }).catch(function(){ return true; });
+}
+function queuePreviewPersist(){
+  previewPersistChain = previewPersistChain.then(function(){ return persistAllPreviews(); }).then(function(failed){
+    if(failed) previewPersistFailed = true;
+  }, function(){ previewPersistFailed = true; });
+}
+function hydratePreviews(){
+  var migrated = false;
+  try{ migrated = localStorage.getItem(PREVIEW_MIGRATION_KEY) === "1"; }catch(e){}
+  if(!migrated){
+    return persistAllPreviews().then(function(failed){
+      if(failed) return;
+      try{
+        localStorage.setItem(KEY, JSON.stringify(items.map(itemToStoredJson)));
+        localStorage.setItem(PREVIEW_MIGRATION_KEY, "1");
+      }catch(e){}
+    }).catch(function(){});
+  }
+  var chain = Promise.resolve();
+  items.forEach(function(it){
+    chain = chain.then(function(){
+      if(it.image) return;
+      return previewGet(it.id).then(function(v){
+        if(typeof v === "string" && v){ it.image = v; persistedPreview[it.id] = v; }
+      }, function(){});
+    });
+  });
+  return chain.catch(function(){});
 }
 function base64FromBytes(bytes){
   var s = "";
@@ -1125,6 +1226,7 @@ function permanentDeleteMany(list){
     ids[it.id] = true;
     removed++;
     deleteLocalOriginal(it.id);
+    deleteLocalPreview(it.id);
     queueCompanionDelete(it.id);
     var found = false;
     tombs.forEach(function(t){ if(t.id === it.id){ t.updatedAt = now; found = true; } });
@@ -1154,6 +1256,7 @@ function deleteReferencesNow(list){
     ids[it.id] = true;
     removed++;
     deleteLocalOriginal(it.id);
+    deleteLocalPreview(it.id);
     queueCompanionDelete(it.id);
     var found = false;
     tombs.forEach(function(t){ if(t.id === it.id){ t.updatedAt = now; found = true; } });
@@ -1600,7 +1703,7 @@ function saveFormNow(){
 }
 
 
-/* ---- Review grid (v3.2.7): multi-file pick -> per-section existing
+/* ---- Review grid: multi-file pick -> per-section existing
  * check -> the user selects tiles -> one confirm adds the selected
  * tiles. No folder access and no new permissions; works in all
  * browsers. Existing tiles are dimmed, unselectable, and excluded. */
@@ -2646,9 +2749,14 @@ function startSync(manual){
     });
   }).then(function(ctx){
     var tombs = loadTombs();
+    var preMergeIds = {};
+    items.forEach(function(it){ preMergeIds[it.id] = true; });
     var outcome = mergeRemote(ctx.remoteBodies, items, tombs, ctx.dirty, !ctx.firstDoneBefore);
     items = outcome.items;
     saveTombs(outcome.tombs);
+    var tombAfterMerge = {};
+    outcome.tombs.forEach(function(t){ tombAfterMerge[t.id] = true; });
+    Object.keys(preMergeIds).forEach(function(id){ if(!findItem(id) && tombAfterMerge[id]) deleteLocalPreview(id); });
     outcome.conflicts.forEach(function(c){ saveConflict(c); });
     outcome.droppedOrigIds.forEach(function(id){ deleteLocalOriginal(id); queueCompanionDelete(id); });
     if(ctx.downloadedBodies > 0) clearDirty(ctx.plan.downloadIds);
@@ -2698,20 +2806,26 @@ function startSync(manual){
         try{ localStorage.setItem(SYNC_FIRST_KEY, "1"); }catch(e){}
       }
       if(!save()) throw new Error("save");
-      render();
-      var now = new Date();
-      var hh = String(now.getHours()).padStart(2, "0"), mm = String(now.getMinutes()).padStart(2, "0");
-      lastSyncText = "آخر تزامن: " + hh + ":" + mm + " — رُفع " + res.uploaded + "، نزل " + ctx.downloadedBodies + "." + (note ? " " + note : "");
-      updateSyncStatus();
-      if(res.uploadFailed) toast("نزلت التحديثات من Drive، بس الرفع ما اكتمل — راح نحاول الرفع بالتزامن الجاي، وبياناتك المحلية محفوظة.");
-      else toast("تم التزامن ✓");
-      syncRunning = false;
-      return true;
+      return persistAllPreviews().then(function(previewFailed){
+        render();
+        var now = new Date();
+        var hh = String(now.getHours()).padStart(2, "0"), mm = String(now.getMinutes()).padStart(2, "0");
+        lastSyncText = "آخر تزامن: " + hh + ":" + mm + " — رُفع " + res.uploaded + "، نزل " + ctx.downloadedBodies + "." + (note ? " " + note : "");
+        updateSyncStatus();
+        var localPreviewFailed = previewFailed || previewPersistFailed;
+        previewPersistFailed = false;
+        if(localPreviewFailed && manual) toast("تم التزامن من Drive، بس حفظ بعض المعاينات محلياً ما اكتمل — راح نحاول من جديد بالتزامن الجاي، وصورك محفوظة.");
+        else if(res.uploadFailed) toast("نزلت التحديثات من Drive، بس الرفع ما اكتمل — راح نحاول الرفع بالتزامن الجاي، وبياناتك المحلية محفوظة.");
+        else toast("تم التزامن ✓");
+        syncRunning = false;
+        return true;
+      });
     });
   }).catch(function(err){
     syncRunning = false;
     if(err && err.cancelled) return false;
     if(err && err.message === "session"){ toast("انتهت الجلسة، سجّل دخول من جديد"); }
+    else if(err && err.message === "save"){ toast("ما گدرنا نحفظ البيانات محلياً. جرّب من جديد."); }
     else toast("تعذّر التزامن. جرّب من جديد.");
     return false;
   });
@@ -3014,7 +3128,7 @@ function showStatus(){
   var kb = estimateKB != null ? estimateKB : storageKB();
   var account = accessToken ? "مسجّل دخول ✓" : "غير مسجّل دخول";
   showModal({
-    title: "صوري وبرومبتاتي 3.2.7 — نسخة الحاسبة",
+    title: "صوري وبرومبتاتي 3.2.8 — نسخة الحاسبة",
     message: "عناصر: " + c.live + "\nالمفضلة: " + c.fav + "\nمحذوفات: " + c.trash + "\nمراجع الشخصية: " + c.refs + "\nحجم الحفظ التقريبي: " + kb + " كيلوبايت\nالحساب: " + account + "\n" + lastSyncText,
     buttons: [{ label: "حسناً", kind: "main" }]
   });
@@ -3217,23 +3331,28 @@ function bindUI(){
 }
 document.addEventListener("DOMContentLoaded", function(){
   items = load();
-  bindUI();
-  bindPullToRefresh();
-  render();
-  refreshEstimate();
-  watchGisScript();
-  initGis();
-  updateSyncStatus();
-  var granted = false;
-  try{ granted = localStorage.getItem(SYNC_GRANT_KEY) === "1"; }catch(e){}
-  if(granted){
-    onGisReadyOnce(function(){ if(!pendingSignIn) signIn(false); });
-    if(!ensureGisReady()) startGisPoll();
-  } else {
-    var sp = document.getElementById("signinPage");
-    if(sp) sp.classList.add("show");
-    if(!ensureGisReady()) startGisPoll();
-  }
+  /* Hydrate previews from IndexedDB (and migrate old-format localStorage
+     previews into IndexedDB) BEFORE the first render and before any
+     sync can run, so no sync ever uploads an unhydrated empty preview. */
+  hydratePreviews().then(function(){
+    bindUI();
+    bindPullToRefresh();
+    render();
+    refreshEstimate();
+    watchGisScript();
+    initGis();
+    updateSyncStatus();
+    var granted = false;
+    try{ granted = localStorage.getItem(SYNC_GRANT_KEY) === "1"; }catch(e){}
+    if(granted){
+      onGisReadyOnce(function(){ if(!pendingSignIn) signIn(false); });
+      if(!ensureGisReady()) startGisPoll();
+    } else {
+      var sp = document.getElementById("signinPage");
+      if(sp) sp.classList.add("show");
+      if(!ensureGisReady()) startGisPoll();
+    }
+  });
 });
 </script>
 </body>
