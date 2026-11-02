@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>صوري وبرومبتاتي</title>
-<!-- PromptPics PC v3.2 — parity with the native Kotlin app v3.2 (same pattern, same specs).
+<!-- PromptPics PC v3.2.7 — parity with the native Kotlin app v3.2 (same pattern, same specs), Character tab + review grid.
      Drive sync requires https (e.g. GitHub Pages). Sign-in will NOT work from file://.
      The Web OAuth client ID baked into this page is a public identifier (it alone grants nothing); no secret is stored in this file. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -45,6 +45,24 @@ textarea{min-height:110px;resize:vertical;line-height:1.7}
 #viewer .noimg-sign{font-size:24px;bottom:10px;right:12px}
 #grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;padding:12px 12px 30px}
 @media (max-width:480px){#grid{grid-template-columns:repeat(2,1fr)}}
+.tabcount{grid-column:1/-1;color:#9aa3b8;font-size:13px;line-height:1.7;padding:2px 4px 0}
+/* Review grid (v3.2.7): same 5-column poster styling as the library grid;
+ * existing tiles are dimmed and unselectable, with «موجودة ✓» in place
+ * of the file name. */
+#reviewSection{display:none;margin-top:12px}
+#reviewSection.show{display:block}
+#reviewGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;padding:10px 0}
+@media (max-width:480px){#reviewGrid{grid-template-columns:repeat(2,1fr)}}
+.review-tile{position:relative;background:#1c2338;border:1px solid #2a3350;border-radius:12px;overflow:hidden;cursor:pointer}
+.review-tile img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#000}
+.review-tile .review-name{font-size:11px;line-height:1.5;padding:6px 8px;word-break:break-word;min-height:32px}
+.review-tile .review-check{position:absolute;top:8px;inset-inline-start:8px;width:22px;height:22px;accent-color:#f5b942;cursor:pointer;z-index:2}
+.review-tile.existing{opacity:.45;cursor:default}
+.review-tile.existing img{filter:grayscale(.4)}
+.review-tile.existing .review-name{color:#f5b942;font-weight:700;text-align:center}
+.review-tile.unselected{outline:2px solid #2a3350}
+#reviewBar{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+#reviewBar .review-info{color:#9aa3b8;font-size:13px;line-height:1.7;flex:1 1 100%}
 .card{background:#1c2338;border:1px solid #2a3350;border-radius:12px;overflow:hidden}
 .card img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;cursor:pointer;background:#000}
 .card-check{position:absolute;top:8px;inset-inline-start:8px;width:22px;height:22px;accent-color:#f5b942;cursor:pointer;z-index:2}
@@ -116,7 +134,7 @@ body.locked{overflow:hidden}
 <div id="appPage">
 <header>
   <div class="header-text">
-  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.6</span></h1>
+  <h1>📷 صوري وبرومبتاتي <span style="font-size:13px;color:#9aa3b8">— نسخة الحاسبة 3.2.7</span></h1>
   <div class="sub" id="countLine">لا توجد صور بعد.</div>
   </div>
   <button type="button" class="btn-ghost" id="menuBtn" aria-label="فتح القائمة">☰</button>
@@ -149,6 +167,7 @@ body.locked{overflow:hidden}
 <input id="search" type="text" placeholder="🔍 ابحث بالعنوان، البرومبت أو الوسوم">
 <div class="tabs" role="tablist" aria-label="تبويبات المكتبة">
   <button type="button" id="tabAll" class="btn-ghost active" role="tab">الكل</button>
+  <button type="button" id="tabChar" class="btn-ghost" role="tab">الشخصية</button>
   <button type="button" id="tabFav" class="btn-ghost" role="tab">★ المفضلة</button>
   <button type="button" id="tabTrash" class="btn-ghost" role="tab">المحذوفات</button>
 </div>
@@ -165,13 +184,23 @@ body.locked{overflow:hidden}
     <button type="button" class="btn-ghost btn-small" id="replaceBtn" style="flex:1">🔄 استبدال الصورة</button>
     <button type="button" class="btn-danger btn-small" id="removeBtn" style="flex:1">🗑 إزالة الصورة</button>
   </div>
-  <label for="titleInput">العنوان (اختياري)</label>
+  <div id="reviewSection">
+    <div id="reviewGrid"></div>
+    <div id="reviewBar">
+      <div class="review-info" id="reviewInfo"></div>
+      <button type="button" class="btn-main" id="reviewConfirmBtn">إضافة المحدد</button>
+      <button type="button" class="btn-ghost" id="reviewCancelBtn">إلغاء الاختيار</button>
+    </div>
+  </div>
+  <label for="titleInput" id="titleLabel">العنوان (اختياري)</label>
   <input id="titleInput" type="text" placeholder="مثال: صورة الشاطئ">
-  <label for="promptInput">البرومبت *</label>
+  <label for="promptInput" id="promptLabel">البرومبت *</label>
   <textarea id="promptInput" placeholder="اكتب وصف الصورة / البرومبت هنا…"></textarea>
-  <label for="tagsInput">الوسوم (اختياري)</label>
+  <label for="noteInput" id="noteLabel" style="display:none">الملاحظة (اختياري)</label>
+  <textarea id="noteInput" style="display:none" placeholder="ملاحظة عن الصورة المرجعية…"></textarea>
+  <label for="tagsInput" id="tagsLabel">الوسوم (اختياري)</label>
   <input id="tagsInput" type="text" placeholder="وسوم مفصولة بفاصلة">
-  <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+  <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap" id="saveRow">
     <button class="btn-main" id="saveBtn">💾 حفظ</button>
     <button class="btn-ghost" id="cancelBtn">إلغاء</button>
   </div>
@@ -232,6 +261,7 @@ var PLACEHOLDER_IMG = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA
 
 var items = [];
 var editingId = null;
+var formIsReference = false;
 var pendingImage = null;
 var viewerPromptText = "";
 var viewerItemId = null;
@@ -517,7 +547,9 @@ function normalizeItem(it, now){
     updatedAt: it.updatedAt || now,
     favorite: it.favorite === true,
     trashed: it.trashed === true || it.deleted === true,
-    tags: parseTagsJson(it.tags)
+    tags: parseTagsJson(it.tags),
+    isReference: it.isReference === true,
+    note: typeof it.note === "string" ? it.note : ""
   };
   applyOrigFields(o, pickOrigFields(it));
   return o;
@@ -532,7 +564,9 @@ function itemToJson(it){
     updatedAt: it.updatedAt || Date.now(),
     favorite: !!it.favorite,
     trashed: !!it.trashed,
-    tags: parseTags((it.tags || []).join(","))
+    tags: parseTags((it.tags || []).join(",")),
+    isReference: !!it.isReference,
+    note: typeof it.note === "string" ? it.note : ""
   };
   var f = pickOrigFields(it);
   if(f){ o.origName = f.origName; o.origMime = f.origMime; o.origSize = f.origSize; o.origHash = f.origHash; }
@@ -552,6 +586,8 @@ function itemToSyncBody(it, deleted){
     body.favorite = !!it.favorite;
     body.trashed = !!it.trashed;
     body.tags = parseTags((it.tags || []).join(","));
+    body.isReference = !!it.isReference;
+    body.note = typeof it.note === "string" ? it.note : "";
     var f = pickOrigFields(it);
     if(f){ body.origName = f.origName; body.origMime = f.origMime; body.origSize = f.origSize; body.origHash = f.origHash; }
   }
@@ -841,20 +877,43 @@ function fallbackCopy(text){
 function visibleItems(list, tab, q){
   var query = String(q || "").trim().toLowerCase();
   return list.filter(function(it){
-    var inTab = tab === "trash" ? !!it.trashed : tab === "fav" ? (!it.trashed && !!it.favorite) : !it.trashed;
+    var ref = !!it.isReference;
+    var inTab = tab === "char" ? (ref && !it.trashed)
+      : tab === "trash" ? (!!it.trashed && !ref)
+      : tab === "fav" ? (!it.trashed && !ref && !!it.favorite)
+      : (!it.trashed && !ref);
     if(!inTab) return false;
     if(!query) return true;
+    if(ref){
+      var hayRef = ((it.title || "") + " " + (it.note || "")).toLowerCase();
+      return hayRef.indexOf(query) !== -1;
+    }
     var hay = ((it.title || "") + " " + it.prompt).toLowerCase();
     return hay.indexOf(query) !== -1 || tagsMatch(it.tags, query);
   });
 }
 function counts(){
-  var live = 0, fav = 0, trash = 0;
+  var live = 0, fav = 0, trash = 0, refs = 0;
   items.forEach(function(it){
+    if(it.isReference){ if(!it.trashed) refs++; return; }
     if(it.trashed) trash++;
     else { live++; if(it.favorite) fav++; }
   });
-  return { live: live, fav: fav, trash: trash };
+  return { live: live, fav: fav, trash: trash, refs: refs };
+}
+function charSizeKB(){
+  var bytes = 0;
+  items.forEach(function(it){
+    if(!it.isReference || it.trashed) return;
+    bytes += (it.image || "").length * 2;
+    var f = pickOrigFields(it);
+    if(f && f.origSize) bytes += f.origSize;
+  });
+  return Math.round(bytes / 1024);
+}
+function refreshAddButton(){
+  var btn = document.getElementById("addBtn");
+  if(btn) btn.textContent = activeTab === "char" ? "＋ إضافة صور مرجعية" : "＋ إضافة صورة جديدة";
 }
 function updateCountLine(){
   var c = counts();
@@ -868,8 +927,10 @@ function selectTab(tab){
   activeTab = tab;
   selectedIds = {};
   document.getElementById("tabAll").classList.toggle("active", tab === "all");
+  document.getElementById("tabChar").classList.toggle("active", tab === "char");
   document.getElementById("tabFav").classList.toggle("active", tab === "fav");
   document.getElementById("tabTrash").classList.toggle("active", tab === "trash");
+  refreshAddButton();
   render();
 }
 /* ---- Grid render: keyed diff (no full rebuilds). Card nodes are
@@ -919,7 +980,7 @@ function cardFor(it){
   btns.appendChild(copyBtn);
   body.appendChild(btns);
   card.appendChild(body);
-  card._img = img; card._check = check; card._star = star;
+  card._img = img; card._check = check; card._star = star; card._copyBtn = copyBtn;
   card._title = title; card._badge = badge; card._sign = sign;
   return card;
 }
@@ -933,14 +994,23 @@ function updateCard(card, it){
   card._title.textContent = (it.favorite ? "★ " : "") + (it.title || "بدون عنوان");
   card._star.textContent = it.favorite ? "★" : "☆";
   card._star.classList.toggle("fav", !!it.favorite);
+  card._star.style.display = it.isReference ? "none" : "";
+  card._copyBtn.style.display = it.isReference ? "none" : "";
   card._check.checked = !!selectedIds[it.id];
 }
 function render(){
   var q = document.getElementById("search").value || "";
   var grid = document.getElementById("grid");
-  Array.prototype.slice.call(grid.querySelectorAll(".empty")).forEach(function(el){ grid.removeChild(el); });
+  Array.prototype.slice.call(grid.querySelectorAll(".empty,.tabcount")).forEach(function(el){ grid.removeChild(el); });
   updateCountLine();
   var shown = visibleItems(items, activeTab, q);
+  if(activeTab === "char"){
+    var cRefs = counts();
+    var tabEl = document.createElement("div");
+    tabEl.className = "tabcount";
+    tabEl.textContent = "عدد الصور المرجعية: " + cRefs.refs + "  •  حجم تقريبي: " + charSizeKB() + " كيلوبايت";
+    grid.appendChild(tabEl);
+  }
   var seen = {};
   shown.forEach(function(it){ seen[it.id] = true; });
   Object.keys(cardNodes).forEach(function(id){
@@ -954,6 +1024,7 @@ function render(){
     emptyEl = document.createElement("div");
     emptyEl.className = "empty";
     emptyEl.textContent = q.trim() ? "لا توجد نتائج مطابقة. جرّب كلمة ثانية."
+      : activeTab === "char" ? "لا توجد صور مرجعية بعد. اضغط «إضافة صور مرجعية» وأضف عدة صور دفعة واحدة."
       : activeTab === "fav" ? "لا توجد عناصر مفضلة بعد."
       : activeTab === "trash" ? "المحذوفات فارغة."
       : "اضغط «إضافة صورة» وابدأ أول صورة وبرومبت.";
@@ -978,7 +1049,7 @@ function findItem(id){
 }
 function toggleFavorite(id){
   var it = findItem(id);
-  if(!it) return;
+  if(!it || it.isReference) return;
   it.favorite = !it.favorite;
   it.updatedAt = nextStamp(it.updatedAt);
   markDirty(id);
@@ -995,6 +1066,7 @@ function onCardClick(id){
 }
 /* ---- Trash / restore / permanent delete (phone rules) ---- */
 function moveToTrash(it){
+  if(it && it.isReference){ showReferenceDeleteDialog([it]); return; }
   showModal({
     message: "نُقل العنصر للمحذوفات ومزامنة الحذف؟ يمكن استرجاعه لاحقاً.",
     buttons: [
@@ -1069,10 +1141,52 @@ function permanentDeleteMany(list){
   render(); toast("تم الحذف نهائياً."); afterLocalChange();
   list.forEach(function(it){ tryDeleteRemoteCompanion(it.id); });
 }
+
+/* ---- Direct permanent delete for references (never Trash) ---- */
+function deleteReferencesNow(list){
+  var now = Date.now();
+  var ids = {};
+  var removed = 0;
+  var tombs = loadTombs();
+  list.forEach(function(it){
+    var cur = findItem(it.id);
+    if(!cur || !cur.isReference) return;
+    ids[it.id] = true;
+    removed++;
+    deleteLocalOriginal(it.id);
+    queueCompanionDelete(it.id);
+    var found = false;
+    tombs.forEach(function(t){ if(t.id === it.id){ t.updatedAt = now; found = true; } });
+    if(!found) tombs.push({ id: it.id, updatedAt: now });
+  });
+  if(!removed) return;
+  items = items.filter(function(x){ return !ids[x.id]; });
+  var dirty = loadDirtyIds();
+  Object.keys(ids).forEach(function(id){ delete dirty[id]; });
+  saveDirtyIds(dirty);
+  saveTombs(tombs);
+  Object.keys(ids).forEach(function(id){ delete selectedIds[id]; delete cardNodes[id]; delete fpCache[id]; });
+  if(!save()) return;
+  render(); toast("تم الحذف نهائياً."); afterLocalChange();
+  list.forEach(function(it){ tryDeleteRemoteCompanion(it.id); });
+}
+function showReferenceDeleteDialog(list){
+  var msg = list.length === 1
+    ? "سيتم حذف الصورة المرجعية نهائياً ولا يمكن استرجاعها."
+    : "سيتم حذف " + list.length + " صور مرجعية نهائياً ولا يمكن استرجاعها.";
+  showModal({
+    message: msg,
+    buttons: [
+      { label: "حذف نهائي", kind: "danger", onClick: function(){ deleteReferencesNow(list); } },
+      { label: "إلغاء", kind: "ghost" }
+    ]
+  });
+}
+
 /* ---- Viewer (six buttons, single scroll container) ---- */
 function openViewer(it){
   viewerItemId = it.id;
-  viewerPromptText = it.prompt;
+  viewerPromptText = it.isReference ? (it.note || "") : it.prompt;
   refreshViewerContent(it);
   document.getElementById("viewer").classList.add("show");
   document.body.classList.add("locked");
@@ -1083,8 +1197,11 @@ function refreshViewerContent(it){
   document.getElementById("viewerNoImg").style.display = it.image ? "none" : "block";
   document.getElementById("viewerSign").style.display = it.image ? "none" : "block";
   document.getElementById("viewerTitle").textContent = it.title || "بدون عنوان";
-  document.getElementById("viewerPrompt").textContent = it.prompt;
+  document.getElementById("viewerPrompt").textContent = it.isReference ? (it.note || "لا توجد ملاحظة.") : it.prompt;
   document.getElementById("viewerDownload").style.display = it.image ? "block" : "none";
+  document.getElementById("viewerCopy").style.display = it.isReference ? "none" : "";
+  document.getElementById("viewerShare").style.display = it.isReference ? "none" : "";
+  document.getElementById("viewerFavorite").style.display = it.isReference ? "none" : "";
   document.getElementById("viewerFavorite").textContent = it.favorite ? "إزالة ★" : "★ مفضلة";
 }
 function refreshViewerIfOpen(){
@@ -1092,7 +1209,7 @@ function refreshViewerIfOpen(){
   if(!document.getElementById("viewer").classList.contains("show")) return;
   var it = findItem(viewerItemId);
   if(!it || it.trashed){ closeViewer(); return; }
-  viewerPromptText = it.prompt;
+  viewerPromptText = it.isReference ? (it.note || "") : it.prompt;
   refreshViewerContent(it);
 }
 function closeViewer(){
@@ -1181,7 +1298,7 @@ function updateImageBtns(){
 }
 function draftSave(){
   try{
-    if(editingId) return;
+    if(editingId || formIsReference) return;
     localStorage.setItem(DRAFT_KEY, JSON.stringify({
       title: document.getElementById("titleInput").value,
       prompt: document.getElementById("promptInput").value
@@ -1198,15 +1315,25 @@ function draftLoad(){
 function draftClear(){
   try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
 }
-function openForm(item, draft){
+function setFieldVisible(id, show){
+  var el = document.getElementById(id);
+  if(el) el.style.display = show ? "" : "none";
+}
+function openForm(item, draft, opts){
+  opts = opts || {};
+  formIsReference = item ? !!item.isReference : !!opts.reference;
   editingId = item ? item.id : null;
   pendingImage = item ? item.image : null;
   pendingOriginal = null;
   pendingOriginalRemoved = false;
   pendingFingerprint = null;
-  document.getElementById("formTitle").textContent = item ? "تعديل الصورة" : "إضافة صورة جديدة";
+  clearReview();
+  var fileEl = document.getElementById("fileInput");
+  if(fileEl){ fileEl.value = ""; fileEl.multiple = !item; }
+  document.getElementById("formTitle").textContent = item ? "تعديل الصورة" : (formIsReference ? "إضافة صور مرجعية" : "إضافة صورة جديدة");
   document.getElementById("titleInput").value = item ? (item.title || "") : (draft ? (draft.title || "") : "");
   document.getElementById("promptInput").value = item ? item.prompt : (draft ? (draft.prompt || "") : "");
+  document.getElementById("noteInput").value = item ? (item.note || "") : (draft ? (draft.note || "") : "");
   document.getElementById("tagsInput").value = item ? joinTags(item.tags) : "";
   if(!item && !draft){
     var d = draftLoad();
@@ -1215,7 +1342,6 @@ function openForm(item, draft){
       document.getElementById("promptInput").value = d.prompt || "";
     }
   }
-  document.getElementById("fileInput").value = "";
   var prev = document.getElementById("preview");
   if(pendingImage){ prev.src = pendingImage; prev.style.display = "block"; }
   else { prev.removeAttribute("src"); prev.style.display = "none"; }
@@ -1223,6 +1349,18 @@ function openForm(item, draft){
   if(fields) showSavedName(fields.origName || downloadNameFor(item));
   else if(item && item.image) showSavedName(downloadNameFor(item));
   else showSavedName(null);
+  /* Reference forms hide prompt + tags (kept, not edited); bulk
+   * reference adds also hide the title (file names become titles) and
+   * the note (added per item later). Prompt forms hide the note. */
+  var bulkRef = formIsReference && !item;
+  setFieldVisible("titleLabel", !bulkRef);
+  setFieldVisible("titleInput", !bulkRef);
+  setFieldVisible("promptLabel", !formIsReference);
+  setFieldVisible("promptInput", !formIsReference);
+  setFieldVisible("noteLabel", formIsReference && !!item);
+  setFieldVisible("noteInput", formIsReference && !!item);
+  setFieldVisible("tagsLabel", !formIsReference);
+  setFieldVisible("tagsInput", !formIsReference);
   updateImageBtns();
   document.getElementById("form").classList.add("show");
   document.getElementById("form").scrollTop = 0;
@@ -1233,36 +1371,41 @@ function closeForm(){
   document.getElementById("form").classList.remove("show");
   editingId = null; pendingImage = null;
   pendingOriginal = null; pendingOriginalRemoved = false; pendingFingerprint = null;
+  formIsReference = false;
+  clearReview();
   document.body.classList.remove("locked");
   updateLock();
 }
 /* Duplicate check, phone order: origHash equality, then preview-string
  * (FNV) equality, then the pixel-fingerprint fallback for legacy items
  * whose previews were encoded by a different encoder. */
-function findDuplicateOrig(hash, excludeId){
+function findDuplicateOrig(hash, excludeId, isReference){
   if(!hash) return null;
   for(var i = 0; i < items.length; i++){
     var it = items[i];
     if(it.id === excludeId) continue;
+    if(!!it.isReference !== !!isReference) continue;
     if(it.origHash && it.origHash === hash) return it;
   }
   return null;
 }
-function findDuplicateImage(dataUrl, excludeId){
+function findDuplicateImage(dataUrl, excludeId, isReference){
   if(!dataUrl) return null;
   var h = imageHash(dataUrl);
   for(var i = 0; i < items.length; i++){
     var it = items[i];
     if(it.id === excludeId) continue;
+    if(!!it.isReference !== !!isReference) continue;
     if(it.image && imageHash(it.image) === h) return it;
   }
   return null;
 }
-function findDuplicateByPixels(fp, excludeId){
+function findDuplicateByPixels(fp, excludeId, isReference){
   if(!fp) return Promise.resolve(null);
   var checks = [];
   items.forEach(function(it){
     if(it.id === excludeId || !it.image) return;
+    if(!!it.isReference !== !!isReference) return;
     checks.push(cachedFingerprint(it).then(function(other){
       return (other && fingerprintIsDuplicate(fp, other)) ? it : null;
     }));
@@ -1272,10 +1415,10 @@ function findDuplicateByPixels(fp, excludeId){
     return null;
   });
 }
-function checkDuplicate(dataUrl, origHash, fp, excludeId){
-  if(origHash && findDuplicateOrig(origHash, excludeId)) return Promise.resolve(true);
-  if(dataUrl && findDuplicateImage(dataUrl, excludeId)) return Promise.resolve(true);
-  return findDuplicateByPixels(fp, excludeId).then(function(hit){ return !!hit; });
+function checkDuplicate(dataUrl, origHash, fp, excludeId, isReference){
+  if(origHash && findDuplicateOrig(origHash, excludeId, isReference)) return Promise.resolve(true);
+  if(dataUrl && findDuplicateImage(dataUrl, excludeId, isReference)) return Promise.resolve(true);
+  return findDuplicateByPixels(fp, excludeId, isReference).then(function(hit){ return !!hit; });
 }
 function blockDuplicatePick(){
   var existing = editingId ? findItem(editingId) : null;
@@ -1294,7 +1437,7 @@ function blockDuplicatePick(){
     showSavedName(null);
   }
   updateImageBtns();
-  toast("⚠️ هذه الصورة موجودة مسبقاً في مكتبتك.");
+  toast(formIsReference ? "⚠️ هذه الصورة موجودة مسبقاً في خانة الشخصية." : "⚠️ هذه الصورة موجودة مسبقاً في مكتبتك.");
 }
 /* Image compression: longest side 1080, JPEG 0.8 stepping down to 0.5
  * while the data URL exceeds 900,000 chars. EXIF orientation is applied
@@ -1369,7 +1512,7 @@ function onFilePicked(file){
       if(pendingOriginal) toast("اختيرت " + pendingOriginal.name + "؛ اضغط حفظ");
       fingerprintForDataUrl(originalDataUrl).then(function(fp){
         pendingFingerprint = fp;
-        checkDuplicate(url, pendingOriginal ? pendingOriginal.hash : null, fp, editingId).then(function(dup){
+        checkDuplicate(url, pendingOriginal ? pendingOriginal.hash : null, fp, editingId, formIsReference).then(function(dup){
           if(dup) blockDuplicatePick();
         });
       });
@@ -1382,7 +1525,8 @@ function saveFormNow(){
   var prompt = document.getElementById("promptInput").value.trim();
   var title = document.getElementById("titleInput").value.trim();
   var tags = parseTags(document.getElementById("tagsInput").value);
-  if(!prompt){ toast("اكتب البرومبت أولاً."); return; }
+  if(reviewMode){ toast("أكّد اختيار الصور من شبكة المراجعة أولاً."); return; }
+  if(!prompt && !formIsReference){ toast("اكتب البرومبت أولاً."); return; }
   var newImage = pendingImage || "";
   var now = Date.now();
   var existing = editingId ? findItem(editingId) : null;
@@ -1409,7 +1553,7 @@ function saveFormNow(){
       showSavedName(null);
     }
     updateImageBtns();
-    toast("⚠️ هذه الصورة موجودة مسبقاً — اختر صورة مختلفة أو أزلها.");
+    toast(formIsReference ? "⚠️ هذه الصورة موجودة مسبقاً في خانة الشخصية — اختر صورة مختلفة أو أزلها." : "⚠️ هذه الصورة موجودة مسبقاً — اختر صورة مختلفة أو أزلها.");
   }
   function finishSave(){
     var fields = null;
@@ -1418,10 +1562,12 @@ function saveFormNow(){
     if(isEdit){
       existing.title = title; existing.prompt = prompt; existing.image = newImage;
       existing.favorite = existing.favorite; existing.trashed = existing.trashed;
-      existing.tags = tags; existing.updatedAt = stamp;
+      if(existing.isReference){ existing.note = document.getElementById("noteInput").value.trim(); }
+      else { existing.tags = tags; }
+      existing.updatedAt = stamp;
       applyOrigFields(existing, fields);
     } else {
-      var item = { id: targetId, title: title, prompt: prompt, image: newImage, createdAt: stamp, updatedAt: stamp, favorite: false, trashed: false, tags: tags };
+      var item = { id: targetId, title: title, prompt: prompt, image: newImage, createdAt: stamp, updatedAt: stamp, favorite: false, trashed: false, tags: tags, isReference: !!formIsReference, note: "" };
       applyOrigFields(item, fields);
       items.unshift(item);
     }
@@ -1444,13 +1590,252 @@ function saveFormNow(){
     finishSave();
   }
   if(newImage && imageChanged){
-    checkDuplicate(newImage, pending ? pending.hash : null, pendingFingerprint, editingId).then(function(dup){
+    checkDuplicate(newImage, pending ? pending.hash : null, pendingFingerprint, editingId, formIsReference).then(function(dup){
       if(dup){ blockDuplicateSave(); return; }
       proceed();
     });
   } else {
     proceed();
   }
+}
+
+
+/* ---- Review grid (v3.2.7): multi-file pick -> per-section existing
+ * check -> the user selects tiles -> one confirm adds the selected
+ * tiles. No folder access and no new permissions; works in all
+ * browsers. Existing tiles are dimmed, unselectable, and excluded. */
+var reviewCaptures = [];
+var reviewMode = null; /* "prompt" | "reference" | null */
+function reviewTargetIsReference(){ return reviewMode === "reference"; }
+function clearReview(){
+  reviewCaptures = [];
+  reviewMode = null;
+  var sec = document.getElementById("reviewSection");
+  if(sec) sec.classList.remove("show");
+  var grid = document.getElementById("reviewGrid");
+  if(grid){ while(grid.firstChild) grid.removeChild(grid.firstChild); }
+  var row = document.getElementById("saveRow");
+  if(row) row.style.display = "";
+  var info = document.getElementById("reviewInfo");
+  if(info) info.textContent = "";
+}
+function captureFromFile(file, done){
+  /* Same pipeline as the single-pick gate (preview compression +
+   * original fields + fingerprint), so a review tile is checked exactly
+   * like a single picked file. Files over the 64 MiB cap are skipped. */
+  if(!file || file.size > 64 * 1024 * 1024){ done(null); return; }
+  var reader = new FileReader();
+  reader.onload = function(){
+    var originalDataUrl = reader.result;
+    compressImage(file, function(url){
+      var orig = null;
+      if(typeof originalDataUrl === "string" && originalDataUrl){
+        var payload = payloadFromDataUrl(originalDataUrl);
+        var sz = (typeof file.size === "number" && isFinite(file.size)) ? file.size : decodedSize(payload);
+        orig = {
+          dataUrl: originalDataUrl,
+          file: file,
+          name: sanitizeOrigName(file.name || "") || "image",
+          mime: (file.type || mimeFromDataUrl(originalDataUrl) || ""),
+          size: sz,
+          hash: origHashFor(originalDataUrl)
+        };
+      }
+      fingerprintForDataUrl(originalDataUrl).then(function(fp){
+        done({ name: orig ? orig.name : (sanitizeOrigName(file.name || "") || "image"), preview: url, orig: orig, fp: fp, exists: false, selected: true });
+      });
+    });
+  };
+  reader.onerror = function(){ done(null); };
+  reader.readAsDataURL(file);
+}
+function classifyReviewCaptures(captures, isReference){
+  var chain = Promise.resolve();
+  captures.forEach(function(cap){
+    chain = chain.then(function(){
+      return checkDuplicate(cap.preview, cap.orig ? cap.orig.hash : null, cap.fp, null, isReference).then(function(dup){
+        cap.exists = !!dup;
+        cap.selected = !cap.exists;
+      });
+    });
+  });
+  return chain.then(function(){ return captures; });
+}
+function reviewCounts(captures){
+  var selected = 0, skipped = 0;
+  (captures || reviewCaptures).forEach(function(cap){
+    if(cap.exists) skipped++;
+    else if(cap.selected) selected++;
+  });
+  return { selected: selected, skipped: skipped };
+}
+function renderReviewGrid(){
+  var grid = document.getElementById("reviewGrid");
+  if(!grid) return;
+  while(grid.firstChild) grid.removeChild(grid.firstChild);
+  reviewCaptures.forEach(function(cap){
+    var tile = document.createElement("article");
+    tile.className = "review-tile" + (cap.exists ? " existing" : (cap.selected ? "" : " unselected"));
+    var img = document.createElement("img");
+    img.src = cap.preview;
+    img.alt = cap.name;
+    tile.appendChild(img);
+    if(!cap.exists){
+      var check = document.createElement("input");
+      check.type = "checkbox";
+      check.className = "review-check";
+      check.checked = !!cap.selected;
+      check.setAttribute("aria-label", "تحديد الصورة");
+      check.addEventListener("change", function(){
+        cap.selected = check.checked;
+        tile.classList.toggle("unselected", !cap.selected);
+        updateReviewBar();
+      });
+      tile.appendChild(check);
+      tile.addEventListener("click", function(ev){
+        if(ev.target === check) return;
+        cap.selected = !cap.selected;
+        check.checked = cap.selected;
+        tile.classList.toggle("unselected", !cap.selected);
+        updateReviewBar();
+      });
+    }
+    var name = document.createElement("div");
+    name.className = "review-name";
+    name.dir = "auto";
+    name.textContent = cap.exists ? "موجودة ✓" : cap.name;
+    tile.appendChild(name);
+    grid.appendChild(tile);
+  });
+  updateReviewBar();
+}
+function updateReviewBar(){
+  var c = reviewCounts(reviewCaptures);
+  var btn = document.getElementById("reviewConfirmBtn");
+  if(btn){ btn.textContent = "إضافة المحدد (" + c.selected + ")"; btn.disabled = c.selected === 0; }
+  var info = document.getElementById("reviewInfo");
+  if(info){
+    info.textContent = c.skipped > 0
+      ? "تم تخطي " + c.skipped + " موجودة مسبقاً في " + (reviewTargetIsReference() ? "خانة الشخصية" : "المكتبة") + "."
+      : "اختار الصور اللي تريد إضافتها، وألغي تحديد اللي ما تريده.";
+  }
+}
+function openReview(files){
+  reviewMode = formIsReference ? "reference" : "prompt";
+  var info = document.getElementById("reviewInfo");
+  if(info) info.textContent = "جارٍ فحص الصور…";
+  var sec = document.getElementById("reviewSection");
+  if(sec) sec.classList.add("show");
+  var row = document.getElementById("saveRow");
+  if(row) row.style.display = "none";
+  var prev = document.getElementById("preview");
+  if(prev) prev.style.display = "none";
+  var imgBtns = document.getElementById("imageBtns");
+  if(imgBtns) imgBtns.style.display = "none";
+  pendingImage = null; pendingOriginal = null; pendingFingerprint = null;
+  /* Sequential captures keep the user's pick order in the grid. */
+  var caps = [];
+  var chain = Promise.resolve();
+  (files || []).forEach(function(file){
+    chain = chain.then(function(){
+      return new Promise(function(resolve){
+        captureFromFile(file, function(cap){ if(cap) caps.push(cap); resolve(); });
+      });
+    });
+  });
+  chain.then(function(){
+    reviewCaptures = caps;
+    return classifyReviewCaptures(reviewCaptures, reviewTargetIsReference());
+  }).then(function(){ renderReviewGrid(); });
+}
+function cancelReview(){
+  clearReview();
+  pendingImage = null; pendingOriginal = null; pendingFingerprint = null;
+  var fi = document.getElementById("fileInput");
+  if(fi) fi.value = "";
+  var prev = document.getElementById("preview");
+  if(prev){ prev.removeAttribute("src"); prev.style.display = "none"; }
+  showSavedName(null);
+  updateImageBtns();
+}
+function confirmReview(){
+  var c = reviewCounts(reviewCaptures);
+  if(c.selected === 0){ toast("ما اخترت أي صورة."); return; }
+  var fields = {
+    title: document.getElementById("titleInput").value.trim(),
+    prompt: document.getElementById("promptInput").value.trim(),
+    tags: parseTags(document.getElementById("tagsInput").value)
+  };
+  if(!reviewTargetIsReference() && !fields.prompt){ toast("اكتب البرومبت أولاً."); return; }
+  var caps = reviewCaptures.slice();
+  var mode = reviewMode;
+  var skipped = c.skipped;
+  saveReviewCaptures(caps, mode, fields).then(function(res){
+    clearReview();
+    closeForm();
+    render();
+    var parts = [];
+    if(res.added) parts.push("تمت إضافة " + res.added + (mode === "reference" ? " صورة مرجعية" : " صورة"));
+    if(skipped) parts.push("تم تخطي " + skipped + " موجودة");
+    if(res.failed) parts.push("تعذّرت " + res.failed);
+    toast(parts.join("؛ ") + " ✓");
+    afterLocalChange();
+  });
+}
+function saveReviewCaptures(caps, mode, fields){
+  var selected = caps.filter(function(cap){ return !cap.exists && cap.selected; });
+  var skipped = caps.filter(function(cap){ return cap.exists; }).length;
+  var now = Date.now();
+  var added = 0, failed = 0;
+  var newItems = [];
+  var chain = Promise.resolve();
+  selected.forEach(function(cap, i){
+    chain = chain.then(function(){
+      var stamp = now + i;
+      var item = {
+        id: "p" + stamp + Math.floor(Math.random() * 1000),
+        title: mode === "reference" ? cap.name : ((selected.length === 1 && fields.title) ? fields.title : cap.name),
+        prompt: mode === "reference" ? "" : fields.prompt,
+        image: cap.preview,
+        createdAt: stamp,
+        updatedAt: stamp,
+        favorite: false,
+        trashed: false,
+        tags: mode === "reference" ? [] : fields.tags,
+        isReference: mode === "reference",
+        note: ""
+      };
+      var origFields = cap.orig ? { origName: cap.orig.name, origMime: cap.orig.mime, origSize: cap.orig.size, origHash: cap.orig.hash } : null;
+      applyOrigFields(item, origFields);
+      function commit(){ newItems.push(item); added++; }
+      if(!cap.orig){ commit(); return; }
+      return new Promise(function(resolve){
+        storePendingOriginal(item.id, cap.orig, function(ok){
+          if(ok) commit();
+          else failed++;
+          resolve();
+        });
+      });
+    });
+  });
+  return chain.then(function(){
+    if(newItems.length){
+      items = newItems.concat(items);
+      if(!save()){
+        var ids = {};
+        newItems.forEach(function(x){ ids[x.id] = true; });
+        items = items.filter(function(x){ return !ids[x.id]; });
+        return { added: 0, skipped: skipped, failed: failed + newItems.length };
+      }
+      markDirtyMany(newItems.map(function(x){ return x.id; }));
+    }
+    return { added: added, skipped: skipped, failed: failed };
+  });
+}
+function onFilesPicked(files){
+  if(!files || !files.length) return;
+  if(files.length === 1 || editingId){ onFilePicked(files[0]); return; }
+  openReview(files);
 }
 
 /* ---- CRC32 + ZIP (STORE writer, STORED/DEFLATE reader; no libs) ---- */
@@ -1833,9 +2218,9 @@ function importFile(file){
   reader.readAsArrayBuffer(file);
 }
 /* ---- Merge (mirror SyncEngine.mergeRemote exactly, with presence
- * flags: favorite/trashed/tags from a remote body win ONLY when the
- * key is present; an absent key keeps the LOCAL value. A PC round-trip
- * must never drop fields the phone stored. ---- */
+ * flags: favorite/trashed/tags/isReference/note from a remote body win
+ * ONLY when the key is present; an absent key keeps the LOCAL value.
+ * A PC round-trip must never drop fields the phone stored. ---- */
 function mergeRemote(remoteFiles, localItems, tombs, dirtySet, isFirstSync){
   var byId = {};
   localItems.forEach(function(it){ byId[it.id] = it; });
@@ -1913,6 +2298,8 @@ function mergeRemoteItem(local, remote){
   var hasFavorite = Object.prototype.hasOwnProperty.call(remote, "favorite");
   var hasTrashed = Object.prototype.hasOwnProperty.call(remote, "trashed");
   var hasTags = Object.prototype.hasOwnProperty.call(remote, "tags");
+  var hasRef = Object.prototype.hasOwnProperty.call(remote, "isReference");
+  var hasNote = Object.prototype.hasOwnProperty.call(remote, "note");
   var out = {
     id: remote.id,
     title: remote.title || "",
@@ -1922,7 +2309,9 @@ function mergeRemoteItem(local, remote){
     updatedAt: remote.updatedAt,
     favorite: hasFavorite ? !!remote.favorite : !!local.favorite,
     trashed: hasTrashed ? !!remote.trashed : !!local.trashed,
-    tags: hasTags ? parseTagsJson(remote.tags) : (local.tags || []).slice()
+    tags: hasTags ? parseTagsJson(remote.tags) : (local.tags || []).slice(),
+    isReference: hasRef ? !!remote.isReference : !!local.isReference,
+    note: hasNote ? (typeof remote.note === "string" ? remote.note : "") : (typeof local.note === "string" ? local.note : "")
   };
   var remoteFields = pickOrigFields(remote);
   var localFields = pickOrigFields(local);
@@ -1942,7 +2331,9 @@ function remoteItemToLocal(remote){
     updatedAt: remote.updatedAt || now,
     favorite: !!remote.favorite,
     trashed: !!remote.trashed,
-    tags: parseTagsJson(remote.tags)
+    tags: parseTagsJson(remote.tags),
+    isReference: !!remote.isReference,
+    note: typeof remote.note === "string" ? remote.note : ""
   };
   applyOrigFields(o, pickOrigFields(remote));
   return o;
@@ -2155,9 +2546,9 @@ function validateRemoteBody(text, fileName){
     if(parsed.image !== undefined && typeof parsed.image !== "string") return null;
     var idFromName = fileName.slice(0, -5);
     if(parsed.id !== idFromName) return null;
-    /* Presence-preserving: favorite/trashed/tags/orig keys are copied
-     * ONLY when present in the remote body, so merge can tell "key
-     * absent" (keep local) from "key present" (remote wins). */
+    /* Presence-preserving: favorite/trashed/tags/isReference/note/orig
+     * keys are copied ONLY when present in the remote body, so merge
+     * can tell "key absent" (keep local) from "key present" (remote wins). */
     var body = {
       id: parsed.id,
       title: typeof parsed.title === "string" ? parsed.title : "",
@@ -2170,6 +2561,8 @@ function validateRemoteBody(text, fileName){
     if(Object.prototype.hasOwnProperty.call(parsed, "favorite")) body.favorite = parsed.favorite;
     if(Object.prototype.hasOwnProperty.call(parsed, "trashed")) body.trashed = parsed.trashed;
     if(Object.prototype.hasOwnProperty.call(parsed, "tags")) body.tags = parsed.tags;
+    if(Object.prototype.hasOwnProperty.call(parsed, "isReference")) body.isReference = parsed.isReference;
+    if(Object.prototype.hasOwnProperty.call(parsed, "note")) body.note = parsed.note;
     if(Object.prototype.hasOwnProperty.call(parsed, "origName")) body.origName = parsed.origName;
     if(Object.prototype.hasOwnProperty.call(parsed, "origMime")) body.origMime = parsed.origMime;
     if(Object.prototype.hasOwnProperty.call(parsed, "origSize")) body.origSize = parsed.origSize;
@@ -2621,8 +3014,8 @@ function showStatus(){
   var kb = estimateKB != null ? estimateKB : storageKB();
   var account = accessToken ? "مسجّل دخول ✓" : "غير مسجّل دخول";
   showModal({
-    title: "صوري وبرومبتاتي 3.2.6 — نسخة الحاسبة",
-    message: "عناصر: " + c.live + "\nالمفضلة: " + c.fav + "\nمحذوفات: " + c.trash + "\nحجم الحفظ التقريبي: " + kb + " كيلوبايت\nالحساب: " + account + "\n" + lastSyncText,
+    title: "صوري وبرومبتاتي 3.2.7 — نسخة الحاسبة",
+    message: "عناصر: " + c.live + "\nالمفضلة: " + c.fav + "\nمحذوفات: " + c.trash + "\nمراجع الشخصية: " + c.refs + "\nحجم الحفظ التقريبي: " + kb + " كيلوبايت\nالحساب: " + account + "\n" + lastSyncText,
     buttons: [{ label: "حسناً", kind: "main" }]
   });
 }
@@ -2640,7 +3033,7 @@ function showConflicts(){
       return { label: label, onClick: function(){
         try{
           var parsed = JSON.parse(c.bodyJson);
-          openForm(null, { title: parsed.title || "", prompt: parsed.prompt || "" });
+          openForm(null, { title: parsed.title || "", prompt: parsed.prompt || "", note: parsed.note || "" }, { reference: !!parsed.isReference });
         }catch(e){ toast("تعذّر فتح النسخة المحفوظة."); }
       } };
     }),
@@ -2654,7 +3047,16 @@ function showBulkActions(){
   if(!selected.length){ toast("حدد عناصر من مربعات الاختيار أولاً"); return; }
   var trashCount = 0;
   selected.forEach(function(it){ if(it.trashed) trashCount++; });
-  if(activeTab === "trash"){
+  if(activeTab === "char"){
+    showModal({
+      title: "المحدد: " + selected.length,
+      items: [
+        { label: "تصدير المحدد مع الأصول إلى JSON", onClick: function(){ exportSelected(selected); } },
+        { label: "حذف نهائي للمحدد", onClick: function(){ showReferenceDeleteDialog(selected); } },
+        { label: "إلغاء التحديد", onClick: function(){ selectedIds = {}; render(); } }
+      ]
+    });
+  } else if(activeTab === "trash"){
     showModal({
       title: "المحدد: " + selected.length,
       items: [
@@ -2686,7 +3088,7 @@ function bulkTrash(list){
   var stampBase = Date.now();
   list.forEach(function(it, i){
     var cur = findItem(it.id);
-    if(!cur || cur.trashed) return;
+    if(!cur || cur.trashed || cur.isReference) return;
     cur.trashed = true;
     cur.updatedAt = nextStamp(cur.updatedAt);
     markDirty(cur.id);
@@ -2698,7 +3100,7 @@ function bulkTrash(list){
 function bulkRestore(list){
   list.forEach(function(it){
     var cur = findItem(it.id);
-    if(!cur || !cur.trashed) return;
+    if(!cur || !cur.trashed || cur.isReference) return;
     cur.trashed = false;
     cur.updatedAt = nextStamp(cur.updatedAt);
     markDirty(cur.id);
@@ -2744,12 +3146,13 @@ function onEl(id, ev, fn){
   if(el) el.addEventListener(ev, fn);
 }
 function bindUI(){
-  onEl("addBtn", "click", function(){ openForm(null, null); });
+  onEl("addBtn", "click", function(){ openForm(null, null, { reference: activeTab === "char" }); });
   onEl("googleSignInBtn", "click", function(){ signIn(true); });
   onEl("search", "input", render);
   onEl("tabAll", "click", function(){ selectTab("all"); });
   onEl("tabFav", "click", function(){ selectTab("fav"); });
   onEl("tabTrash", "click", function(){ selectTab("trash"); });
+  onEl("tabChar", "click", function(){ selectTab("char"); });
   onEl("closeViewer", "click", closeViewer);
   onEl("viewerCopy", "click", function(){ copyText(viewerPromptText); });
   onEl("viewerEdit", "click", function(){
@@ -2765,11 +3168,13 @@ function bindUI(){
   onEl("viewerDelete", "click", function(){
     var it = findItem(viewerItemId);
     closeViewer();
-    if(it) moveToTrash(it);
+    if(!it) return;
+    if(it.isReference) showReferenceDeleteDialog([it]);
+    else moveToTrash(it);
   });
   onEl("fileInput", "change", function(){
-    var f = this.files && this.files[0];
-    if(f) onFilePicked(f);
+    var files = this.files ? Array.prototype.slice.call(this.files) : [];
+    if(files.length) onFilesPicked(files);
   });
   onEl("replaceBtn", "click", function(){ var fi = document.getElementById("fileInput"); if(fi) fi.click(); });
   onEl("removeBtn", "click", function(){
@@ -2784,6 +3189,8 @@ function bindUI(){
   });
   onEl("cancelBtn", "click", closeForm);
   onEl("saveBtn", "click", saveFormNow);
+  onEl("reviewConfirmBtn", "click", confirmReview);
+  onEl("reviewCancelBtn", "click", cancelReview);
   onEl("titleInput", "input", draftSave);
   onEl("promptInput", "input", draftSave);
   onEl("backupFile", "change", function(){
